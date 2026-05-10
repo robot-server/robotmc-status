@@ -1,9 +1,13 @@
 <?php
 // ==================== 설정 ====================
-$SERVER_HOST = 'your.server.ip';     // ← 여기 반드시 수정!
-$SERVER_PORT = 25565;
-$SERVER_NAME = '마인크래프트 서버';
-$TIMEOUT = 3;
+if (!file_exists(__DIR__ . '/config.ini')) {
+    die('config.ini 파일이 없습니다. config.ini.sample을 config.ini로 복사하여 서버 IP 등을 수정하세요.');
+}
+$config = parse_ini_file(__DIR__ . '/config.ini');
+$SERVER_HOST = $config['server_host'];
+$SERVER_PORT = $config['server_port'];
+$SERVER_NAME = $config['server_name'];
+$TIMEOUT = $config['timeout'];
 // ============================================
 
 require __DIR__ . '/vendor/autoload.php';
