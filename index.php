@@ -1,38 +1,11 @@
 <?php
-// ==================== 설정 ====================
+// config.ini 누락은 운영자 설정 문제이므로 페이지 자체가 안 뜨게 즉시 중단.
 if (!file_exists(__DIR__ . '/config.ini')) {
     die('config.ini 파일이 없습니다. config.ini.sample을 config.ini로 복사하여 서버 IP 등을 수정하세요.');
 }
 $config = parse_ini_file(__DIR__ . '/config.ini');
-$SERVER_HOST = $config['server_host'];
-$SERVER_PORT = $config['server_port'];
-$SERVER_NAME = $config['server_name'];
-$TIMEOUT = $config['timeout'];
-// ============================================
-
-require __DIR__ . '/vendor/autoload.php';
-
-use xPaw\MinecraftPing;
-use xPaw\MinecraftPingException;
-
-$info = null;
-$error = null;
-$pingTime = null;
-
-$start = microtime(true);
-
-try {
-    $ping = new MinecraftPing($SERVER_HOST, $SERVER_PORT, $TIMEOUT);
-    $info = $ping->Query();                    // Server List Ping
-} catch (MinecraftPingException $e) {
-    $error = $e->getMessage();
-} finally {
-    if (isset($ping)) $ping->Close();
-}
-
-$pingTime = round((microtime(true) - $start) * 1000);
+$SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 ?>
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -54,6 +27,18 @@ $pingTime = round((microtime(true) - $start) * 1000);
             transform: translateY(-8px);
             box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
         }
+
+        .status-section {
+            transition: opacity 0.2s ease;
+        }
+
+        .is-hidden {
+            display: none;
+        }
+
+        .is-fading {
+            opacity: 0;
+        }
     </style>
 </head>
 <body class="text-white min-h-screen py-12 px-4">
@@ -64,72 +49,58 @@ $pingTime = round((microtime(true) - $start) * 1000);
     </div>
 
     <div id="status-card" class="card bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-800">
-        <?php if ($info !== null): ?>
-            <!-- 온라인 상태 -->
+
+        <!-- 로딩 -->
+        <div id="status-loading" class="status-section text-center py-16">
+            <i class="fa-solid fa-circle-notch fa-spin text-6xl text-zinc-400 mb-6"></i>
+            <p class="text-zinc-400">서버 상태 확인 중…</p>
+        </div>
+
+        <!-- 온라인 -->
+        <div id="status-online" class="status-section is-hidden is-fading">
             <div class="flex items-center gap-3 mb-6">
                 <div class="w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
                 <span class="text-3xl font-bold text-green-400">온라인</span>
             </div>
 
-            <!-- MOTD -->
-            <div class="bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap border border-zinc-700">
-                <?= nl2br(htmlspecialchars(
-                        is_array($info['description'] ?? '')
-                                ? ($info['description']['text'] ?? json_encode($info['description'], JSON_UNESCAPED_UNICODE))
-                                : ($info['description'] ?? 'MOTD 없음')
-                )) ?>
-            </div>
+            <div id="online-motd"
+                 class="bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-700"></div>
 
-            <!-- 플레이어 수 + 버전 -->
             <div class="grid grid-cols-2 gap-6 mb-8">
                 <div>
                     <p class="text-zinc-400 text-sm">접속자</p>
                     <p class="text-5xl font-bold text-white">
-                        <?= $info['players']['online'] ?? 0 ?>
-                        <span class="text-2xl text-zinc-500">/ <?= $info['players']['max'] ?? 0 ?></span>
+                        <span id="online-players-online">0</span><span class="text-2xl text-zinc-500"> / <span id="online-players-max">0</span></span>
                     </p>
                 </div>
                 <div>
                     <p class="text-zinc-400 text-sm">버전</p>
-                    <p class="text-xl font-medium"><?= htmlspecialchars($info['version']['name'] ?? 'Unknown') ?></p>
+                    <p id="online-version" class="text-xl font-medium">Unknown</p>
                 </div>
             </div>
 
-            <!-- 접속 중인 플레이어 샘플 -->
-            <?php if (!empty($info['players']['sample'])): ?>
-                <div class="mb-8">
-                    <p class="text-zinc-400 text-sm mb-3">현재 접속 중</p>
-                    <div class="flex flex-wrap gap-2">
-                        <?php foreach ($info['players']['sample'] as $player): ?>
-                            <span class="bg-emerald-900/60 text-emerald-300 px-4 py-2 rounded-2xl text-sm font-medium">
-                                    <?= htmlspecialchars($player['name']) ?>
-                                </span>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-            <?php endif; ?>
+            <div id="online-sample-wrap" class="mb-8 is-hidden">
+                <p class="text-zinc-400 text-sm mb-3">현재 접속 중</p>
+                <div id="online-sample" class="flex flex-wrap gap-2"></div>
+            </div>
 
-            <!-- 서버 아이콘 -->
-            <?php if (!empty($info['favicon'])): ?>
-                <div class="flex justify-center mb-6">
-                    <img src="<?= $info['favicon'] ?>"
-                         class="w-28 h-28 rounded-2xl border-4 border-zinc-700 shadow-inner"
-                         alt="서버 아이콘">
-                </div>
-            <?php endif; ?>
+            <div id="online-favicon-wrap" class="flex justify-center mb-6 is-hidden">
+                <img id="online-favicon" class="w-28 h-28 rounded-2xl border-4 border-zinc-700 shadow-inner" alt="서버 아이콘">
+            </div>
 
             <div class="text-center text-zinc-500 text-sm pt-4 border-t border-zinc-800">
-                핑 <?= $pingTime ?>ms • <?= date('Y-m-d H:i:s') ?>
+                핑 <span id="online-ping">-</span>ms • <span id="online-timestamp">-</span>
             </div>
+        </div>
 
-        <?php else: ?>
-            <!-- 오프라인 -->
+        <!-- 오프라인 -->
+        <div id="status-offline" class="status-section is-hidden is-fading">
             <div class="text-center py-16">
                 <i class="fa-solid fa-server text-7xl text-red-500/80 mb-6"></i>
                 <h2 class="text-3xl font-bold text-red-400 mb-3">서버가 오프라인입니다</h2>
-                <p class="text-zinc-400"><?= htmlspecialchars($error ?? '연결할 수 없습니다.') ?></p>
+                <p id="offline-message" class="text-zinc-400">연결할 수 없습니다.</p>
             </div>
-        <?php endif; ?>
+        </div>
     </div>
 
     <div class="text-center mt-10 text-zinc-500 text-xs">
@@ -138,10 +109,119 @@ $pingTime = round((microtime(true) - $start) * 1000);
 </div>
 
 <script>
-    // 30초 후 자동 새로고침
-    setTimeout(() => {
-        location.reload();
-    }, 30000);
+    const sections = {
+        loading: document.getElementById('status-loading'),
+        online:  document.getElementById('status-online'),
+        offline: document.getElementById('status-offline'),
+    };
+
+    function showSection(name) {
+        for (const [key, el] of Object.entries(sections)) {
+            if (key === name) {
+                el.classList.remove('is-hidden');
+                // 다음 프레임에 fade-in 트리거
+                requestAnimationFrame(() => el.classList.remove('is-fading'));
+            } else {
+                el.classList.add('is-fading');
+                el.classList.add('is-hidden');
+            }
+        }
+    }
+
+    function showLoading() {
+        showSection('loading');
+    }
+
+    // MOTD 정리: 앞뒤 공백, 연속 공백, 과도한 빈 줄
+    function cleanMotd(s) {
+        return (s || '')
+            .trim()
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\n{3,}/g, '\n\n');
+    }
+
+    function renderOnline(payload) {
+        const d = payload.data || {};
+        const players = d.players || {};
+        const version = d.version || {};
+
+        // description은 표준 SLP Chat Component: string 또는 {text, extra:[...]} 트리.
+        // 일부 서버는 최상위 text를 비우고 extra에만 내용을 담으므로 재귀로 평탄화.
+        const flatten = (c) => {
+            if (c == null) return '';
+            if (typeof c === 'string') return c;
+            if (typeof c !== 'object') return '';
+            return (c.text || '') + (Array.isArray(c.extra) ? c.extra.map(flatten).join('') : '');
+        };
+        document.getElementById('online-motd').textContent = cleanMotd(flatten(d.description));
+        document.getElementById('online-players-online').textContent = players.online ?? 0;
+        document.getElementById('online-players-max').textContent    = players.max ?? 0;
+        document.getElementById('online-version').textContent        = version.name || 'Unknown';
+        document.getElementById('online-ping').textContent           = payload.ping ?? '-';
+        document.getElementById('online-timestamp').textContent      = payload.timestamp || '-';
+
+        // sample은 표준 SLP로 [{name, id, ...}, ...] 형태
+        const sampleWrap = document.getElementById('online-sample-wrap');
+        const sample = document.getElementById('online-sample');
+        sample.replaceChildren();
+        if (Array.isArray(players.sample)) {
+            for (const p of players.sample) {
+                const name = p?.name;
+                if (typeof name !== 'string') continue;
+                const chip = document.createElement('span');
+                chip.className = 'bg-emerald-900/60 text-emerald-300 px-4 py-2 rounded-2xl text-sm font-medium';
+                chip.textContent = name;
+                sample.appendChild(chip);
+            }
+        }
+        if (sample.children.length > 0) {
+            sampleWrap.classList.remove('is-hidden');
+        } else {
+            sampleWrap.classList.add('is-hidden');
+        }
+
+        // favicon은 data: URI만 신뢰 (XSS 방지)
+        const faviconWrap = document.getElementById('online-favicon-wrap');
+        const favicon = document.getElementById('online-favicon');
+        if (typeof d.favicon === 'string' && d.favicon.startsWith('data:image/')) {
+            favicon.src = d.favicon;
+            faviconWrap.classList.remove('is-hidden');
+        } else {
+            favicon.removeAttribute('src');
+            faviconWrap.classList.add('is-hidden');
+        }
+
+        showSection('online');
+    }
+
+    function renderOffline(msg) {
+        document.getElementById('offline-message').textContent = msg || '연결할 수 없습니다.';
+        showSection('offline');
+    }
+
+    async function loadStatus() {
+        showLoading();
+        try {
+            const res = await fetch('status.php', { cache: 'no-store' });
+            const data = await res.json().catch(() => null);
+            if (res.ok && data?.online) {
+                renderOnline(data);
+            } else {
+                // res.ok=false → API 인프라 예외 (HTTP 500)
+                // data.online=false → MC 서버 오프라인/timeout
+                const msg = res.ok
+                    ? (data?.error || '서버에 연결할 수 없습니다.')
+                    : '상태를 가져오지 못했습니다. 잠시 후 다시 시도해주세요.';
+                renderOffline(msg);
+            }
+        } catch (e) {
+            // 네트워크 단절·DNS 실패 등
+            renderOffline('상태를 가져오지 못했습니다.');
+        }
+    }
+
+    loadStatus();
+    setInterval(loadStatus, 30000);
 </script>
 </body>
 </html>
