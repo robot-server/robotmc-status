@@ -145,10 +145,15 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         const players = d.players || {};
         const version = d.version || {};
 
-        // description: 표준 SLP는 string OR {text:"..."} chat component. plain text로 unwrap.
-        const descRaw = d.description;
-        const desc = (descRaw && typeof descRaw === 'object') ? (descRaw.text ?? '') : (descRaw || '');
-        document.getElementById('online-motd').textContent = cleanMotd(desc);
+        // description은 표준 SLP Chat Component: string 또는 {text, extra:[...]} 트리.
+        // 일부 서버는 최상위 text를 비우고 extra에만 내용을 담으므로 재귀로 평탄화.
+        const flatten = (c) => {
+            if (c == null) return '';
+            if (typeof c === 'string') return c;
+            if (typeof c !== 'object') return '';
+            return (c.text || '') + (Array.isArray(c.extra) ? c.extra.map(flatten).join('') : '');
+        };
+        document.getElementById('online-motd').textContent = cleanMotd(flatten(d.description));
         document.getElementById('online-players-online').textContent = players.online ?? 0;
         document.getElementById('online-players-max').textContent    = players.max ?? 0;
         document.getElementById('online-version').textContent        = version.name || 'Unknown';
