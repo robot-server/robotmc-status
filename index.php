@@ -145,24 +145,31 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         const players = d.players || {};
         const version = d.version || {};
 
-        document.getElementById('online-motd').textContent = cleanMotd(d.description);
+        // description: 표준 SLP는 string OR {text:"..."} chat component. plain text로 unwrap.
+        const descRaw = d.description;
+        const desc = (descRaw && typeof descRaw === 'object') ? (descRaw.text ?? '') : (descRaw || '');
+        document.getElementById('online-motd').textContent = cleanMotd(desc);
         document.getElementById('online-players-online').textContent = players.online ?? 0;
         document.getElementById('online-players-max').textContent    = players.max ?? 0;
         document.getElementById('online-version').textContent        = version.name || 'Unknown';
         document.getElementById('online-ping').textContent           = payload.ping ?? '-';
         document.getElementById('online-timestamp').textContent      = payload.timestamp || '-';
 
-        // 접속 중인 플레이어 칩 — innerHTML 금지, createElement + textContent로 빌드
+        // sample은 표준 SLP로 [{name, id, ...}, ...] 형태
         const sampleWrap = document.getElementById('online-sample-wrap');
         const sample = document.getElementById('online-sample');
         sample.replaceChildren();
-        if (Array.isArray(players.sample) && players.sample.length > 0) {
-            for (const name of players.sample) {
+        if (Array.isArray(players.sample)) {
+            for (const p of players.sample) {
+                const name = p?.name;
+                if (typeof name !== 'string') continue;
                 const chip = document.createElement('span');
                 chip.className = 'bg-emerald-900/60 text-emerald-300 px-4 py-2 rounded-2xl text-sm font-medium';
                 chip.textContent = name;
                 sample.appendChild(chip);
             }
+        }
+        if (sample.children.length > 0) {
             sampleWrap.classList.remove('is-hidden');
         } else {
             sampleWrap.classList.add('is-hidden');

@@ -69,38 +69,12 @@ try {
         }
     }
 
-    // description은 string일 수도, { text: ... } 같은 array일 수도 있음 — string으로 정규화
-    $description = $info['description'] ?? '';
-    if (is_array($description)) {
-        $description = $description['text']
-            ?? json_encode($description, JSON_UNESCAPED_UNICODE);
-    }
-
-    // 플레이어 sample은 [{name, id}, ...] → 이름 문자열 배열로 단순화
-    $sampleNames = [];
-    if (!empty($info['players']['sample']) && is_array($info['players']['sample'])) {
-        foreach ($info['players']['sample'] as $p) {
-            if (isset($p['name']) && is_string($p['name'])) {
-                $sampleNames[] = $p['name'];
-            }
-        }
-    }
-
+    // xpaw 응답은 MC Server List Ping 표준 형태({description, players, version, favicon, ...})
+    // 그대로 전달해 표준 호환을 유지한다. 클라이언트가 표준 형태를 직접 처리.
     respond(200, [
         'online' => true,
         'ping'   => $pingMs,
-        'data'   => [
-            'description' => $description,
-            'players'     => [
-                'online' => $info['players']['online'] ?? 0,
-                'max'    => $info['players']['max']    ?? 0,
-                'sample' => $sampleNames,
-            ],
-            'version' => [
-                'name' => $info['version']['name'] ?? 'Unknown',
-            ],
-            'favicon' => $info['favicon'] ?? null,
-        ],
+        'data'   => $info,
         'error'  => null,
     ]);
 
