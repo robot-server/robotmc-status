@@ -79,5 +79,8 @@ try {
     ]);
 
 } catch (\Throwable $e) {
-    failApi($e->getMessage());
+    // 예외 메시지에 서버 절대 경로 등 민감 정보가 포함될 수 있으므로 로그에만 남기고
+    // 클라이언트에는 일반 메시지를 반환한다.
+    error_log($e->getMessage());
+    failApi('Internal Server Error');
 }
