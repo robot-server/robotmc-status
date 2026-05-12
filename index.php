@@ -32,11 +32,11 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             transition: opacity 0.2s ease;
         }
 
-        .status-section.is-hidden {
+        .is-hidden {
             display: none;
         }
 
-        .status-section.is-fading {
+        .is-fading {
             opacity: 0;
         }
     </style>
