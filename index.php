@@ -121,7 +121,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     <div id="progress-container" class="mt-3 hidden">
         <div class="h-[2px] bg-zinc-800">
             <div id="refresh-progress"
-                 class="h-full w-0 bg-zinc-500 transition-all duration-100 ease-linear"
+                 class="h-full w-0 bg-zinc-500"
                  style="width: 0%"></div>
         </div>
     </div>
@@ -174,10 +174,6 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             progressBar.style.width = '0%';
         }
         rafId = requestAnimationFrame(updateProgress);
-    }
-
-    function resetRefreshCycle() {
-        startRefreshCycle();
     }
 
     function showSection(name) {
@@ -267,6 +263,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     async function loadStatus() {
         const wasInitialLoad = isInitialLoad;
 
+        // Progress Bar 사이클을 loadStatus 시작 시점에 맞춰 시작
+        // (실제 30초 폴링 주기와 정확히 동기화되도록)
+        startRefreshCycle();
+
         if (wasInitialLoad) {
             showLoading();
         } else {
@@ -289,13 +289,9 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 renderOffline(msg);
             }
 
-            // 성공적으로 데이터를 받아왔으면 다음 갱신 사이클 리셋
-            if (res.ok && data) {
-                if (wasInitialLoad) {
-                    // 최초 성공 시 Progress Bar 표시
-                    progressContainer?.classList.remove('hidden');
-                }
-                resetRefreshCycle();
+            if (res.ok && data && wasInitialLoad) {
+                // 최초 성공 시 Progress Bar 표시
+                progressContainer?.classList.remove('hidden');
             }
         } catch (e) {
             // 네트워크 단절·DNS 실패 등
