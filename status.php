@@ -43,7 +43,7 @@ try {
     }
 
     require __DIR__ . '/vendor/autoload.php';
-    require __DIR__ . '/real_ping.php';
+    require_once __DIR__ . '/real_ping.php';
 
     $host    = (string) ($config['server_host'] ?? '');
     $port    = (int)    ($config['server_port'] ?? 25565);

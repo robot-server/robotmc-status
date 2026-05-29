@@ -28,7 +28,9 @@ function get_minecraft_real_ping(string $host, int $port, float $timeout = 3.0):
         return null;
     }
 
-    stream_set_timeout($socket, (int) ceil($timeout));
+    $seconds = (int) $timeout;
+    $microseconds = (int) (($timeout - $seconds) * 1000000);
+    stream_set_timeout($socket, $seconds, $microseconds);
 
     try {
         // 1. Handshake (next state = 1: Status)
@@ -63,7 +65,8 @@ function get_minecraft_real_ping(string $host, int $port, float $timeout = 3.0):
         // Echo된 timestamp 확인 (correlation)
         $echoed = 0;
         if (strlen($response) >= 8) {
-            $echoed = unpack('J', substr($response, 0, 8))[1] ?? 0;
+            $unpacked = unpack('J', substr($response, 0, 8));
+            $echoed = is_array($unpacked) ? ($unpacked[1] ?? 0) : 0;
         }
 
         // RTT 계산 (로컬 시계 기준)
@@ -125,7 +128,11 @@ function read_varint($socket): int
     $result = 0;
     $shift = 0;
     for ($i = 0; $i < 5; $i++) {
-        $byte = ord(fread($socket, 1));
+        $char = fread($socket, 1);
+        if ($char === false || $char === '') {
+            throw new RuntimeException('Socket read failed or EOF');
+        }
+        $byte = ord($char);
         $result |= ($byte & 0x7F) << $shift;
         $shift += 7;
         if (($byte & 0x80) === 0) {
