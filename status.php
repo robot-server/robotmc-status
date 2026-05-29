@@ -43,6 +43,7 @@ try {
     }
 
     require __DIR__ . '/vendor/autoload.php';
+    require_once __DIR__ . '/real_ping.php';
 
     $host    = (string) ($config['server_host'] ?? '');
     $port    = (int)    ($config['server_port'] ?? 25565);
@@ -54,13 +55,10 @@ try {
 
     $ping = null;
     $info = null;
-    $pingMs = null;
 
-    $start = microtime(true);
     try {
         $ping = new \xPaw\MinecraftPing($host, $port, $timeout);
         $info = $ping->Query();
-        $pingMs = (int) round((microtime(true) - $start) * 1000);
     } catch (\xPaw\MinecraftPingException $e) {
         failOffline($e->getMessage());
     } finally {
@@ -69,8 +67,13 @@ try {
         }
     }
 
-    // xpaw 응답은 MC Server List Ping 표준 형태({description, players, version, favicon, ...})
-    // 그대로 전달해 표준 호환을 유지한다. 클라이언트가 표준 형태를 직접 처리.
+    // xPaw는 Status 데이터 조회만 담당.
+    // ping 값은 별도의 0x01 Ping/Pong으로 실제 RTT를 측정 (하이브리드 방식)
+    $pingMs = null;
+    if ($info !== null) {
+        $pingMs = get_minecraft_real_ping($host, $port, $timeout);
+    }
+
     respond(200, [
         'online' => true,
         'ping'   => $pingMs,
