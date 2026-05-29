@@ -118,7 +118,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     </div>
 
     <!-- Progress Bar (카드 바깥 + 카드와 동일 너비) -->
-    <div class="mt-3">
+    <div id="progress-container" class="mt-3 hidden">
         <div class="h-[2px] bg-zinc-800">
             <div id="refresh-progress"
                  class="h-full w-0 bg-zinc-500 transition-all duration-100 ease-linear"
@@ -145,6 +145,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     const refreshIndicatorOnline = document.getElementById('refresh-indicator');
     const refreshIndicatorOffline = document.getElementById('refresh-indicator-offline');
     const progressBar = document.getElementById('refresh-progress');
+    const progressContainer = document.getElementById('progress-container');
 
     const CYCLE_DURATION = 30000; // 30초
 
@@ -264,7 +265,9 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     }
 
     async function loadStatus() {
-        if (isInitialLoad) {
+        const wasInitialLoad = isInitialLoad;
+
+        if (wasInitialLoad) {
             showLoading();
         } else {
             // 백그라운드 갱신일 때만 미묘한 인디케이터 표시
@@ -288,6 +291,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 
             // 성공적으로 데이터를 받아왔으면 다음 갱신 사이클 리셋
             if (res.ok && data) {
+                if (wasInitialLoad) {
+                    // 최초 성공 시 Progress Bar 표시
+                    progressContainer?.classList.remove('hidden');
+                }
                 resetRefreshCycle();
             }
         } catch (e) {
