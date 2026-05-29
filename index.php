@@ -48,7 +48,9 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         <p class="text-zinc-400 mt-2">실시간 서버 상태</p>
     </div>
 
-    <div id="status-card" class="card bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-800">
+    <div id="status-card" class="card bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-800 relative">
+
+
 
         <!-- 로딩 -->
         <div id="status-loading" class="status-section text-center py-16">
@@ -58,9 +60,15 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 
         <!-- 온라인 -->
         <div id="status-online" class="status-section is-hidden is-fading">
-            <div class="flex items-center gap-3 mb-6">
-                <div class="w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
-                <span class="text-3xl font-bold text-green-400">온라인</span>
+            <div class="mb-6 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
+                    <span class="text-3xl font-bold text-green-400">온라인</span>
+                </div>
+                <!-- 백그라운드 갱신 인디케이터 (온라인 상태일 때만) -->
+                <div id="refresh-indicator" class="hidden text-zinc-400">
+                    <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
+                </div>
             </div>
 
             <div id="online-motd"
@@ -95,15 +103,30 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 
         <!-- 오프라인 -->
         <div id="status-offline" class="status-section is-hidden is-fading">
-            <div class="text-center py-16">
+            <div class="py-16 text-center">
                 <i class="fa-solid fa-server text-7xl text-red-500/80 mb-6"></i>
-                <h2 class="text-3xl font-bold text-red-400 mb-3">서버가 오프라인입니다</h2>
+                <div class="mb-3 flex items-center justify-center gap-3">
+                    <h2 class="text-3xl font-bold text-red-400">서버가 오프라인입니다</h2>
+                    <!-- 백그라운드 갱신 인디케이터 (오프라인 상태일 때) -->
+                    <div id="refresh-indicator-offline" class="hidden text-zinc-400">
+                        <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
+                    </div>
+                </div>
                 <p id="offline-message" class="text-zinc-400">연결할 수 없습니다.</p>
             </div>
         </div>
     </div>
 
-    <div class="text-center mt-10 text-zinc-500 text-xs">
+    <!-- Progress Bar (카드 바깥 + 카드와 동일 너비) -->
+    <div id="progress-container" class="mt-3 hidden">
+        <div class="h-[2px] bg-zinc-800">
+            <div id="refresh-progress"
+                 class="h-full w-0 bg-zinc-500"
+                 style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="text-center mt-8 text-zinc-500 text-xs">
         30초마다 자동 갱신 • Ping 기반
     </div>
 </div>
@@ -114,6 +137,44 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         online:  document.getElementById('status-online'),
         offline: document.getElementById('status-offline'),
     };
+
+    let isInitialLoad = true;
+    let cycleStartTime = null;
+    let rafId = null;
+
+    const refreshIndicatorOnline = document.getElementById('refresh-indicator');
+    const refreshIndicatorOffline = document.getElementById('refresh-indicator-offline');
+    const progressBar = document.getElementById('refresh-progress');
+    const progressContainer = document.getElementById('progress-container');
+
+    const CYCLE_DURATION = 30000; // 30초
+
+    function showRefreshIndicator(show) {
+        const action = show ? 'remove' : 'add';
+        refreshIndicatorOnline?.classList[action]('hidden');
+        refreshIndicatorOffline?.classList[action]('hidden');
+    }
+
+    function updateProgress() {
+        if (!cycleStartTime || !progressBar) return;
+
+        const elapsed = Date.now() - cycleStartTime;
+        const progress = Math.min((elapsed / CYCLE_DURATION) * 100, 100);
+        progressBar.style.width = `${progress}%`;
+
+        if (progress < 100) {
+            rafId = requestAnimationFrame(updateProgress);
+        }
+    }
+
+    function startRefreshCycle() {
+        if (rafId) cancelAnimationFrame(rafId);
+        cycleStartTime = Date.now();
+        if (progressBar) {
+            progressBar.style.width = '0%';
+        }
+        rafId = requestAnimationFrame(updateProgress);
+    }
 
     function showSection(name) {
         for (const [key, el] of Object.entries(sections)) {
@@ -200,10 +261,23 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     }
 
     async function loadStatus() {
-        showLoading();
+        const wasInitialLoad = isInitialLoad;
+
+        // Progress Bar 사이클을 loadStatus 시작 시점에 맞춰 시작
+        // (실제 30초 폴링 주기와 정확히 동기화되도록)
+        startRefreshCycle();
+
+        if (wasInitialLoad) {
+            showLoading();
+        } else {
+            // 백그라운드 갱신일 때만 미묘한 인디케이터 표시
+            showRefreshIndicator(true);
+        }
+
         try {
             const res = await fetch('status.php', { cache: 'no-store' });
             const data = await res.json().catch(() => null);
+
             if (res.ok && data?.online) {
                 renderOnline(data);
             } else {
@@ -214,9 +288,17 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                     : '상태를 가져오지 못했습니다. 잠시 후 다시 시도해주세요.';
                 renderOffline(msg);
             }
+
+            if (res.ok && data && wasInitialLoad) {
+                // 최초 성공 시 Progress Bar 표시
+                progressContainer?.classList.remove('hidden');
+            }
         } catch (e) {
             // 네트워크 단절·DNS 실패 등
             renderOffline('상태를 가져오지 못했습니다.');
+        } finally {
+            isInitialLoad = false;
+            showRefreshIndicator(false);
         }
     }
 
