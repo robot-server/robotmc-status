@@ -115,6 +115,8 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         offline: document.getElementById('status-offline'),
     };
 
+    let isInitialLoad = true;
+
     function showSection(name) {
         for (const [key, el] of Object.entries(sections)) {
             if (key === name) {
@@ -200,7 +202,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     }
 
     async function loadStatus() {
-        showLoading();
+        if (isInitialLoad) {
+            showLoading();
+        }
+
         try {
             const res = await fetch('status.php', { cache: 'no-store' });
             const data = await res.json().catch(() => null);
@@ -217,6 +222,8 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         } catch (e) {
             // 네트워크 단절·DNS 실패 등
             renderOffline('상태를 가져오지 못했습니다.');
+        } finally {
+            isInitialLoad = false;
         }
     }
 
