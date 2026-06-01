@@ -162,43 +162,55 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 
     const CYCLE_DURATION = 30000; // 30초
 
-    // ===== 테마 관리 (라이트/다크 모드 지원) =====
+    // ===== 테마 관리 (3-state: system / light / dark) =====
     function initTheme() {
         const toggleBtn = document.getElementById('theme-toggle');
         const icon = document.getElementById('theme-icon');
 
-        function applyTheme(mode) {
-            let isDark;
-            if (mode === 'system') {
-                isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            } else {
-                isDark = mode === 'dark';
-            }
-            document.documentElement.classList.toggle('dark', isDark);
+        function updateIcon(mode) {
+            if (!icon) return;
+            icon.className = 'fa-solid text-lg';
 
-            if (icon) {
-                icon.classList.toggle('fa-moon', !isDark);
-                icon.classList.toggle('fa-sun', isDark);
+            if (mode === 'light') {
+                icon.classList.add('fa-sun');
+                toggleBtn.title = '라이트 모드 (클릭하여 변경)';
+            } else if (mode === 'dark') {
+                icon.classList.add('fa-moon');
+                toggleBtn.title = '다크 모드 (클릭하여 변경)';
+            } else {
+                icon.classList.add('fa-circle-half-stroke'); // system
+                toggleBtn.title = '시스템 설정 따르기 (클릭하여 변경)';
             }
         }
 
-        // 초기 테마 적용 (저장된 값 또는 시스템 설정)
+        function applyTheme(mode) {
+            const isDark = mode === 'dark' ||
+                (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+            document.documentElement.classList.toggle('dark', isDark);
+            localStorage.setItem('theme', mode);
+            updateIcon(mode);
+        }
+
+        // 초기 테마 적용
         const saved = localStorage.getItem('theme') || 'system';
         applyTheme(saved);
 
-        // 토글 버튼: 클릭 시 명시적 light/dark 전환 + 저장
+        // 클릭 시 순환: system → light → dark → system
         toggleBtn?.addEventListener('click', () => {
-            const currentlyDark = document.documentElement.classList.contains('dark');
-            const next = currentlyDark ? 'light' : 'dark';
-            localStorage.setItem('theme', next);
+            const current = localStorage.getItem('theme') || 'system';
+            let next;
+            if (current === 'system') next = 'light';
+            else if (current === 'light') next = 'dark';
+            else next = 'system';
+
             applyTheme(next);
         });
 
-        // 시스템 설정 변경 시 (사용자가 명시적 선택을 하지 않은 경우에만 반영)
+        // 시스템 설정 변경 시 (현재 'system' 모드일 때만 반영)
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         mediaQuery.addEventListener('change', () => {
-            const savedPref = localStorage.getItem('theme');
-            if (!savedPref || savedPref === 'system') {
+            if ((localStorage.getItem('theme') || 'system') === 'system') {
                 applyTheme('system');
             }
         });
