@@ -14,8 +14,29 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     <title><?= htmlspecialchars($SERVER_NAME) ?> - 서버 상태</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        };
+        // FOUC 방지: 가능한 한 빨리 테마 클래스 적용
+        (function() {
+            try {
+                const saved = localStorage.getItem('theme') || 'system';
+                const isDark = saved === 'dark' ||
+                    (saved === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) {
+                // localStorage 접근 차단 등의 환경 무시
+            }
+        })();
+    </script>
     <style>
         body {
+            background: linear-gradient(to bottom, #f4f4f5, #fafafa);
+        }
+        .dark body {
             background: linear-gradient(to bottom, #18181b, #09090b);
         }
 
@@ -41,21 +62,19 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         }
     </style>
 </head>
-<body class="text-white min-h-screen py-12 px-4">
+<body class="text-zinc-900 dark:text-white min-h-screen py-12 px-4">
 <div class="max-w-lg mx-auto">
     <div class="text-center mb-10">
         <h1 class="text-4xl font-bold tracking-tight"><?= htmlspecialchars($SERVER_NAME) ?></h1>
-        <p class="text-zinc-400 mt-2">실시간 서버 상태</p>
+        <p class="text-zinc-500 dark:text-zinc-400 mt-2">실시간 서버 상태</p>
     </div>
 
-    <div id="status-card" class="card bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-800 relative">
-
-
+    <div id="status-card" class="card bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-200 dark:border-zinc-800">
 
         <!-- 로딩 -->
         <div id="status-loading" class="status-section text-center py-16">
-            <i class="fa-solid fa-circle-notch fa-spin text-6xl text-zinc-400 mb-6"></i>
-            <p class="text-zinc-400">서버 상태 확인 중…</p>
+            <i class="fa-solid fa-circle-notch fa-spin text-6xl text-zinc-500 dark:text-zinc-400 mb-6"></i>
+            <p class="text-zinc-500 dark:text-zinc-400">서버 상태 확인 중…</p>
         </div>
 
         <!-- 온라인 -->
@@ -63,40 +82,40 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             <div class="mb-6 flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <div class="w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
-                    <span class="text-3xl font-bold text-green-400">온라인</span>
+                    <span class="text-3xl font-bold text-green-600 dark:text-green-400">온라인</span>
                 </div>
                 <!-- 백그라운드 갱신 인디케이터 (온라인 상태일 때만) -->
-                <div id="refresh-indicator" class="hidden text-zinc-400">
+                <div id="refresh-indicator" class="hidden text-zinc-500 dark:text-zinc-400">
                     <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
                 </div>
             </div>
 
             <div id="online-motd"
-                 class="bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-700"></div>
+                 class="bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-200 dark:border-zinc-700"></div>
 
             <div class="grid grid-cols-2 gap-6 mb-8">
                 <div>
-                    <p class="text-zinc-400 text-sm">접속자</p>
-                    <p class="text-5xl font-bold text-white">
-                        <span id="online-players-online">0</span><span class="text-2xl text-zinc-500"> / <span id="online-players-max">0</span></span>
+                    <p class="text-zinc-500 dark:text-zinc-400 text-sm">접속자</p>
+                    <p class="text-5xl font-bold text-zinc-900 dark:text-white">
+                        <span id="online-players-online">0</span><span class="text-2xl text-zinc-500 dark:text-zinc-500"> / <span id="online-players-max">0</span></span>
                     </p>
                 </div>
                 <div>
-                    <p class="text-zinc-400 text-sm">버전</p>
-                    <p id="online-version" class="text-xl font-medium">Unknown</p>
+                    <p class="text-zinc-500 dark:text-zinc-400 text-sm">버전</p>
+                    <p id="online-version" class="text-xl font-medium text-zinc-900 dark:text-white">Unknown</p>
                 </div>
             </div>
 
             <div id="online-sample-wrap" class="mb-8 is-hidden">
-                <p class="text-zinc-400 text-sm mb-3">현재 접속 중</p>
+                <p class="text-zinc-500 dark:text-zinc-400 text-sm mb-3">현재 접속 중</p>
                 <div id="online-sample" class="flex flex-wrap gap-2"></div>
             </div>
 
             <div id="online-favicon-wrap" class="flex justify-center mb-6 is-hidden">
-                <img id="online-favicon" class="w-28 h-28 rounded-2xl border-4 border-zinc-700 shadow-inner" alt="서버 아이콘">
+                <img id="online-favicon" class="w-28 h-28 rounded-2xl border-4 border-zinc-200 dark:border-zinc-700 shadow-inner" alt="서버 아이콘">
             </div>
 
-            <div class="text-center text-zinc-500 text-sm pt-4 border-t border-zinc-800">
+            <div class="text-center text-zinc-500 dark:text-zinc-500 text-sm pt-4 border-t border-zinc-200 dark:border-zinc-800">
                 핑 <span id="online-ping">-</span>ms • <span id="online-timestamp">-</span>
             </div>
         </div>
@@ -106,30 +125,37 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             <div class="py-16 text-center">
                 <i class="fa-solid fa-server text-7xl text-red-500/80 mb-6"></i>
                 <div class="mb-3 flex items-center justify-center gap-3">
-                    <h2 class="text-3xl font-bold text-red-400">서버가 오프라인입니다</h2>
+                    <h2 class="text-3xl font-bold text-red-500 dark:text-red-400">서버가 오프라인입니다</h2>
                     <!-- 백그라운드 갱신 인디케이터 (오프라인 상태일 때) -->
-                    <div id="refresh-indicator-offline" class="hidden text-zinc-400">
+                    <div id="refresh-indicator-offline" class="hidden text-zinc-500 dark:text-zinc-400">
                         <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
                     </div>
                 </div>
-                <p id="offline-message" class="text-zinc-400">연결할 수 없습니다.</p>
+                <p id="offline-message" class="text-zinc-500 dark:text-zinc-400">연결할 수 없습니다.</p>
             </div>
         </div>
     </div>
 
     <!-- Progress Bar (카드 바깥 + 카드와 동일 너비) -->
     <div id="progress-container" class="mt-3 hidden">
-        <div class="h-[2px] bg-zinc-800">
+        <div class="h-[2px] bg-zinc-200 dark:bg-zinc-800">
             <div id="refresh-progress"
-                 class="h-full w-0 bg-zinc-500"
+                 class="h-full w-0 bg-zinc-400 dark:bg-zinc-500"
                  style="width: 0%"></div>
         </div>
     </div>
 
-    <div class="text-center mt-8 text-zinc-500 text-xs">
+    <div class="text-center mt-8 text-zinc-500 dark:text-zinc-500 text-xs">
         30초마다 자동 갱신 • Ping 기반
     </div>
 </div>
+
+<!-- 테마 토글 (화면 오른쪽 위 고정) -->
+<button id="theme-toggle"
+        class="fixed top-4 right-4 z-50 w-10 h-10 flex items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 shadow-sm border border-zinc-200 dark:border-zinc-700 transition-all active:scale-95"
+        aria-label="테마 전환">
+    <i id="theme-icon" class="fa-solid fa-moon text-lg"></i>
+</button>
 
 <script>
     const sections = {
@@ -148,6 +174,67 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     const progressContainer = document.getElementById('progress-container');
 
     const CYCLE_DURATION = 30000; // 30초
+
+    // ===== 테마 관리 (3-state: system / light / dark) =====
+    function initTheme() {
+        const toggleBtn = document.getElementById('theme-toggle');
+        const icon = document.getElementById('theme-icon');
+
+        const THEME_ORDER = ['system', 'light', 'dark'];
+
+        function updateIcon(mode) {
+            if (!icon || !toggleBtn) return;
+
+            icon.classList.remove('fa-sun', 'fa-moon', 'fa-circle-half-stroke');
+
+            if (mode === 'light') {
+                icon.classList.add('fa-sun');
+                toggleBtn.title = '라이트 모드 (클릭하여 변경)';
+            } else if (mode === 'dark') {
+                icon.classList.add('fa-moon');
+                toggleBtn.title = '다크 모드 (클릭하여 변경)';
+            } else {
+                icon.classList.add('fa-circle-half-stroke');
+                toggleBtn.title = '시스템 설정 따르기 (클릭하여 변경)';
+            }
+        }
+
+        function applyTheme(mode) {
+            const isDark = mode === 'dark' ||
+                (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+            document.documentElement.classList.toggle('dark', isDark);
+            localStorage.setItem('theme', mode);
+            updateIcon(mode);
+        }
+
+        // 초기 테마 적용
+        const saved = localStorage.getItem('theme') || 'system';
+        applyTheme(saved);
+
+        // 클릭 시 순환: system → light → dark → system
+        toggleBtn?.addEventListener('click', () => {
+            const current = localStorage.getItem('theme') || 'system';
+            const currentIndex = THEME_ORDER.indexOf(current);
+            const next = THEME_ORDER[(currentIndex + 1) % THEME_ORDER.length];
+            applyTheme(next);
+        });
+
+        // 시스템 설정 변경 시 (현재 'system' 모드일 때만 반영)
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        mediaQuery.addEventListener('change', () => {
+            if ((localStorage.getItem('theme') || 'system') === 'system') {
+                applyTheme('system');
+            }
+        });
+    }
+
+    // 테마 초기화 실패가 페이지 전체 로딩을 막지 않도록 보호
+    try {
+        initTheme();
+    } catch (e) {
+        console.error('테마 초기화 실패:', e);
+    }
 
     function showRefreshIndicator(show) {
         const action = show ? 'remove' : 'add';
@@ -230,7 +317,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 const name = p?.name;
                 if (typeof name !== 'string') continue;
                 const chip = document.createElement('span');
-                chip.className = 'bg-emerald-900/60 text-emerald-300 px-4 py-2 rounded-2xl text-sm font-medium';
+                chip.className = 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 px-4 py-2 rounded-2xl text-sm font-medium';
                 chip.textContent = name;
                 sample.appendChild(chip);
             }
