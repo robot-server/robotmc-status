@@ -18,6 +18,19 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         tailwind.config = {
             darkMode: 'class'
         };
+        // FOUC 방지: 가능한 한 빨리 테마 클래스 적용
+        (function() {
+            try {
+                const saved = localStorage.getItem('theme') || 'system';
+                const isDark = saved === 'dark' ||
+                    (saved === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) {
+                // localStorage 접근 차단 등의 환경 무시
+            }
+        })();
     </script>
     <style>
         body {
@@ -167,9 +180,12 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         const toggleBtn = document.getElementById('theme-toggle');
         const icon = document.getElementById('theme-icon');
 
+        const THEME_ORDER = ['system', 'light', 'dark'];
+
         function updateIcon(mode) {
-            if (!icon) return;
-            icon.className = 'fa-solid text-lg';
+            if (!icon || !toggleBtn) return;
+
+            icon.classList.remove('fa-sun', 'fa-moon', 'fa-circle-half-stroke');
 
             if (mode === 'light') {
                 icon.classList.add('fa-sun');
@@ -178,7 +194,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 icon.classList.add('fa-moon');
                 toggleBtn.title = '다크 모드 (클릭하여 변경)';
             } else {
-                icon.classList.add('fa-circle-half-stroke'); // system
+                icon.classList.add('fa-circle-half-stroke');
                 toggleBtn.title = '시스템 설정 따르기 (클릭하여 변경)';
             }
         }
@@ -199,11 +215,8 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         // 클릭 시 순환: system → light → dark → system
         toggleBtn?.addEventListener('click', () => {
             const current = localStorage.getItem('theme') || 'system';
-            let next;
-            if (current === 'system') next = 'light';
-            else if (current === 'light') next = 'dark';
-            else next = 'system';
-
+            const currentIndex = THEME_ORDER.indexOf(current);
+            const next = THEME_ORDER[(currentIndex + 1) % THEME_ORDER.length];
             applyTheme(next);
         });
 
@@ -216,7 +229,12 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         });
     }
 
-    initTheme();
+    // 테마 초기화 실패가 페이지 전체 로딩을 막지 않도록 보호
+    try {
+        initTheme();
+    } catch (e) {
+        console.error('테마 초기화 실패:', e);
+    }
 
     function showRefreshIndicator(show) {
         const action = show ? 'remove' : 'add';
