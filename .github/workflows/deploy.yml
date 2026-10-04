@@ -138,8 +138,9 @@ jobs:
               exit(1);
           }
 
+          require 'lib/config.php';
           $quote = static function (string $value): string {
-              return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
+              return config_quote($value);
           };
           $ini = "server_host = {$quote($host)}\n"
               . "server_port = {$port}\n"

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 ini_set('display_errors', '0');
 
+require_once dirname(__DIR__) . '/lib/config.php';
 require_once dirname(__DIR__) . '/lib/history_rules.php';
 require_once dirname(__DIR__) . '/lib/store.php';
 require_once dirname(__DIR__) . '/lib/probe.php';
@@ -71,7 +72,7 @@ function collect_player_count(array $data, string $key): ?int
 
 $presented = collect_presented_token();
 $configPath = dirname(__DIR__) . '/config.ini';
-$config = is_file($configPath) ? parse_ini_file($configPath) : false;
+$config = config_load($configPath);
 if ($config === false) {
     collect_deny();
 }
@@ -84,33 +85,38 @@ if (!is_string($expected) || $expected === '' || $presented === '' || !hash_equa
 try {
     $pdo = checks_pdo($config);
     checks_ensure_schema($pdo);
-    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-    checks_prune($pdo, $now);
-    $latest = checks_latest_at($pdo);
-    if ($latest !== null && ($now->getTimestamp() - $latest->getTimestamp()) < 4 * 60) {
-        header('Content-Type: application/json; charset=utf-8');
-        header('Cache-Control: no-store');
-        echo json_encode(['skipped' => true], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
+    checks_collect_lock($pdo);
+    try {
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        checks_prune($pdo, $now);
+        $latest = checks_latest_at($pdo);
+        if ($latest !== null && ($now->getTimestamp() - $latest->getTimestamp()) < 4 * 60) {
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: no-store');
+            echo json_encode(['skipped' => true], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
 
-    $host = trim((string) ($config['server_host'] ?? ''));
-    if ($host === '') {
-        collect_fail('server_host is empty');
+        $host = trim((string) ($config['server_host'] ?? ''));
+        if ($host === '') {
+            collect_fail('server_host is empty');
+        }
+        $port = (int) ($config['server_port'] ?? 25565);
+        $timeout = (float) ($config['timeout'] ?? 3);
+        $probe = probe_server($host, $port, $timeout);
+        $data = is_array($probe['data']) ? $probe['data'] : [];
+        $ping = $probe['ping'];
+        checks_insert(
+            $pdo,
+            $now,
+            (bool) $probe['online'],
+            is_int($ping) ? $ping : null,
+            collect_player_count($data, 'online'),
+            collect_player_count($data, 'max')
+        );
+    } finally {
+        checks_collect_unlock($pdo);
     }
-    $port = (int) ($config['server_port'] ?? 25565);
-    $timeout = (float) ($config['timeout'] ?? 3);
-    $probe = probe_server($host, $port, $timeout);
-    $data = is_array($probe['data']) ? $probe['data'] : [];
-    $ping = $probe['ping'];
-    checks_insert(
-        $pdo,
-        $now,
-        (bool) $probe['online'],
-        is_int($ping) ? $ping : null,
-        collect_player_count($data, 'online'),
-        collect_player_count($data, 'max')
-    );
 } catch (Throwable $e) {
     error_log($e->getMessage());
     collect_fail('database unavailable');

@@ -37,7 +37,8 @@ try {
     if (!file_exists($configPath)) {
         failApi('config.ini not found');
     }
-    $config = parse_ini_file($configPath);
+    require_once dirname(__DIR__) . '/lib/config.php';
+    $config = config_load($configPath);
     if ($config === false) {
         failApi('config.ini parse failed');
     }

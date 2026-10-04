@@ -1,9 +1,13 @@
 <?php
 // config.ini 누락은 운영자 설정 문제이므로 페이지 자체가 안 뜨게 즉시 중단.
+require_once __DIR__ . '/lib/config.php';
 if (!file_exists(__DIR__ . '/config.ini')) {
     die('config.ini 파일이 없습니다. config.ini.sample을 config.ini로 복사하여 서버 IP 등을 수정하세요.');
 }
-$config = parse_ini_file(__DIR__ . '/config.ini');
+$config = config_load(__DIR__ . '/config.ini');
+if ($config === false) {
+    die('config.ini 파일을 읽지 못했습니다.');
+}
 $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 ?>
 <!DOCTYPE html>
@@ -457,8 +461,34 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         if (value === null || value === undefined || Number.isNaN(Number(value))) {
             return '없음';
         }
-        const rounded = Math.round(Number(value) * 10) / 10;
-        return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+        const number = Number(value);
+        const shown = number >= 100 ? 100 : Math.floor(number * 10 + 1e-8) / 10;
+        return Number.isInteger(shown) ? String(shown) : shown.toFixed(1);
+    }
+
+    function placeHistoryTip(cell) {
+        const tip = cell.querySelector('.history-tip');
+        if (!tip) {
+            return;
+        }
+        tip.style.left = '50%';
+        tip.style.transform = 'translateX(-50%)';
+        const wasHidden = window.getComputedStyle(tip).display === 'none';
+        if (wasHidden) {
+            tip.style.display = 'block';
+        }
+        const margin = 8;
+        const rect = tip.getBoundingClientRect();
+        let shift = 0;
+        if (rect.left < margin) {
+            shift = margin - rect.left;
+        } else if (rect.right > window.innerWidth - margin) {
+            shift = window.innerWidth - margin - rect.right;
+        }
+        tip.style.transform = 'translateX(calc(-50% + ' + shift + 'px))';
+        if (wasHidden) {
+            tip.style.display = '';
+        }
     }
 
     function formatKst(utcSql) {
@@ -518,7 +548,8 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 '샘플 ' + String(day.samples ?? 0),
                 ping
             ].join('\n');
-            cell.title = detail;
+            cell.removeAttribute('title');
+            cell.setAttribute('aria-label', detail);
             let tip = cell.querySelector('.history-tip');
             if (!tip) {
                 tip = document.createElement('div');
@@ -605,6 +636,13 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             document.querySelectorAll('.history-cell.is-open').forEach((node) => node.classList.remove('is-open'));
             if (!wasOpen) {
                 cell.classList.add('is-open');
+                placeHistoryTip(cell);
+            }
+        });
+        document.getElementById('history-cells')?.addEventListener('mouseover', (event) => {
+            const cell = event.target.closest('.history-cell');
+            if (cell) {
+                placeHistoryTip(cell);
             }
         });
         loadHistory();

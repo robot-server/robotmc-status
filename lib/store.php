@@ -38,6 +38,20 @@ function checks_table_missing(PDOException $e): bool
         || (string) $e->getCode() === '42S02';
 }
 
+function checks_collect_lock(PDO $pdo): void
+{
+    $statement = $pdo->query("SELECT GET_LOCK('robotmc_status_collect', 15)");
+    $got = $statement === false ? false : $statement->fetchColumn();
+    if ((string) $got !== '1') {
+        throw new RuntimeException('collect lock unavailable');
+    }
+}
+
+function checks_collect_unlock(PDO $pdo): void
+{
+    $pdo->query("SELECT RELEASE_LOCK('robotmc_status_collect')");
+}
+
 function checks_ensure_schema(PDO $pdo): void
 {
     try {
