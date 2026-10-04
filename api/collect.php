@@ -82,49 +82,63 @@ if (!is_string($expected) || $expected === '' || $presented === '' || !hash_equa
     collect_deny();
 }
 
+$body = null;
+$failure = null;
+$locked = false;
 try {
     $pdo = checks_pdo($config);
     checks_ensure_schema($pdo);
-    checks_collect_lock($pdo);
-    try {
+    if (!checks_collect_lock($pdo)) {
+        $failure = 'collect busy';
+    } else {
+        $locked = true;
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         checks_prune($pdo, $now);
         $latest = checks_latest_at($pdo);
         if ($latest !== null && ($now->getTimestamp() - $latest->getTimestamp()) < 4 * 60) {
-            header('Content-Type: application/json; charset=utf-8');
-            header('Cache-Control: no-store');
-            echo json_encode(['skipped' => true], JSON_UNESCAPED_UNICODE);
-            exit;
+            $body = ['skipped' => true];
+        } else {
+            $host = trim((string) ($config['server_host'] ?? ''));
+            if ($host === '') {
+                $failure = 'server_host is empty';
+            } else {
+                $port = (int) ($config['server_port'] ?? 25565);
+                $timeout = (float) ($config['timeout'] ?? 3);
+                $probe = probe_server($host, $port, $timeout);
+                $data = is_array($probe['data']) ? $probe['data'] : [];
+                $ping = $probe['ping'];
+                checks_insert(
+                    $pdo,
+                    $now,
+                    (bool) $probe['online'],
+                    is_int($ping) ? $ping : null,
+                    collect_player_count($data, 'online'),
+                    collect_player_count($data, 'max')
+                );
+                $body = [
+                    'skipped' => false,
+                    'online' => (bool) $probe['online'],
+                ];
+            }
         }
-
-        $host = trim((string) ($config['server_host'] ?? ''));
-        if ($host === '') {
-            collect_fail('server_host is empty');
-        }
-        $port = (int) ($config['server_port'] ?? 25565);
-        $timeout = (float) ($config['timeout'] ?? 3);
-        $probe = probe_server($host, $port, $timeout);
-        $data = is_array($probe['data']) ? $probe['data'] : [];
-        $ping = $probe['ping'];
-        checks_insert(
-            $pdo,
-            $now,
-            (bool) $probe['online'],
-            is_int($ping) ? $ping : null,
-            collect_player_count($data, 'online'),
-            collect_player_count($data, 'max')
-        );
-    } finally {
-        checks_collect_unlock($pdo);
     }
 } catch (Throwable $e) {
     error_log($e->getMessage());
-    collect_fail('database unavailable');
+    $failure = 'database unavailable';
+} finally {
+    if ($locked) {
+        try {
+            checks_collect_unlock($pdo);
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+        }
+    }
+}
+
+if ($failure !== null) {
+    collect_fail($failure);
 }
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
-echo json_encode([
-    'skipped' => false,
-    'online' => (bool) $probe['online'],
-], JSON_UNESCAPED_UNICODE);
+echo json_encode($body, JSON_UNESCAPED_UNICODE);
