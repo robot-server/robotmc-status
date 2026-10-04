@@ -1,0 +1,8 @@
+.git
+.git/**
+.github
+.github/**
+.idea
+.idea/**
+config.ini
+.lftp_ignore
