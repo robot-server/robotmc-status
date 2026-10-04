@@ -1,5 +1,8 @@
 {
   "require": {
     "xpaw/php-minecraft-query": "^5.0.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5"
   }
 }

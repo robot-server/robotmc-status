@@ -9,6 +9,8 @@
 # .htaccess는 config.ini의 HTTP 접근을 막는다. 배포에 포함한다.
 # SERVER_HOST는 Secret이다. SERVER_PORT, SERVER_NAME, SERVER_TIMEOUT은 Variable이다.
 # 없으면 포트 25565, 이름 "마인크래프트 서버", 타임아웃 3.
+# DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, COLLECT_TOKEN은 Secret이다. 비어 있으면 이 단계가 실패한다.
+# DB_PORT는 Variable이다. 없으면 3306.
 
 name: deploy
 
@@ -73,6 +75,12 @@ jobs:
           SERVER_PORT: ${{ vars.SERVER_PORT }}
           SERVER_NAME: ${{ vars.SERVER_NAME }}
           SERVER_TIMEOUT: ${{ vars.SERVER_TIMEOUT }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ vars.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          COLLECT_TOKEN: ${{ secrets.COLLECT_TOKEN }}
         run: |
           php <<'PHP'
           <?php
@@ -97,8 +105,36 @@ jobs:
               fwrite(STDERR, "SERVER_TIMEOUT must be a positive number\n");
               exit(1);
           }
-          if (preg_match("/[\r\n]/", $host . $name) === 1) {
-              fwrite(STDERR, "SERVER_HOST and SERVER_NAME must be single line\n");
+          $blank = static function (string|false $value): string {
+              return $value === false ? '' : $value;
+          };
+          $dbHost = $blank(getenv('DB_HOST'));
+          $dbPort = $blank(getenv('DB_PORT'));
+          $dbName = $blank(getenv('DB_NAME'));
+          $dbUser = $blank(getenv('DB_USER'));
+          $dbPassword = $blank(getenv('DB_PASSWORD'));
+          $collectToken = $blank(getenv('COLLECT_TOKEN'));
+          if ($dbPort === '') {
+              $dbPort = '3306';
+          }
+          foreach ([
+              'DB_HOST' => $dbHost,
+              'DB_NAME' => $dbName,
+              'DB_USER' => $dbUser,
+              'DB_PASSWORD' => $dbPassword,
+              'COLLECT_TOKEN' => $collectToken,
+          ] as $key => $value) {
+              if ($value === '') {
+                  fwrite(STDERR, $key . " secret is empty\n");
+                  exit(1);
+              }
+          }
+          if (!preg_match('/^\d+$/', $dbPort) || (int) $dbPort < 1 || (int) $dbPort > 65535) {
+              fwrite(STDERR, "DB_PORT must be an integer from 1 to 65535\n");
+              exit(1);
+          }
+          if (preg_match("/[\r\n]/", $host . $name . $dbHost . $dbName . $dbUser . $dbPassword . $collectToken) === 1) {
+              fwrite(STDERR, "config values must be single line\n");
               exit(1);
           }
 
@@ -108,7 +144,13 @@ jobs:
           $ini = "server_host = {$quote($host)}\n"
               . "server_port = {$port}\n"
               . "server_name = {$quote($name)}\n"
-              . "timeout = {$timeout}\n";
+              . "timeout = {$timeout}\n"
+              . "db_host = {$quote($dbHost)}\n"
+              . "db_port = {$dbPort}\n"
+              . "db_name = {$quote($dbName)}\n"
+              . "db_user = {$quote($dbUser)}\n"
+              . "db_password = {$quote($dbPassword)}\n"
+              . "collect_token = {$quote($collectToken)}\n";
           if (file_put_contents('config.ini', $ini) === false) {
               fwrite(STDERR, "failed to write config.ini\n");
               exit(1);
