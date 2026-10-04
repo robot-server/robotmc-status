@@ -33,17 +33,17 @@ function failOffline(string $error): void
 }
 
 try {
-    $configPath = __DIR__ . '/config.ini';
+    $configPath = dirname(__DIR__) . '/config.ini';
     if (!file_exists($configPath)) {
         failApi('config.ini not found');
     }
-    $config = parse_ini_file($configPath);
+    require_once dirname(__DIR__) . '/lib/config.php';
+    $config = config_load($configPath);
     if ($config === false) {
         failApi('config.ini parse failed');
     }
 
-    require __DIR__ . '/vendor/autoload.php';
-    require_once __DIR__ . '/real_ping.php';
+    require_once dirname(__DIR__) . '/lib/probe.php';
 
     $host    = (string) ($config['server_host'] ?? '');
     $port    = (int)    ($config['server_port'] ?? 25565);
@@ -53,31 +53,16 @@ try {
         failApi('server_host is empty in config.ini');
     }
 
-    $ping = null;
-    $info = null;
-
-    try {
-        $ping = new \xPaw\MinecraftPing($host, $port, $timeout);
-        $info = $ping->Query();
-    } catch (\xPaw\MinecraftPingException $e) {
-        failOffline($e->getMessage());
-    } finally {
-        if ($ping !== null) {
-            $ping->Close();
-        }
-    }
-
-    // xPaw는 Status 데이터 조회만 담당.
-    // ping 값은 별도의 0x01 Ping/Pong으로 실제 RTT를 측정 (하이브리드 방식)
-    $pingMs = null;
-    if ($info !== null) {
-        $pingMs = get_minecraft_real_ping($host, $port, $timeout);
+    // 실시간 조회는 수집과 같은 probe를 쓰지만 행을 넣지 않는다.
+    $result = probe_server($host, $port, $timeout);
+    if (!$result['online']) {
+        failOffline($result['error'] ?? '서버에 연결할 수 없습니다.');
     }
 
     respond(200, [
         'online' => true,
-        'ping'   => $pingMs,
-        'data'   => $info,
+        'ping'   => $result['ping'],
+        'data'   => $result['data'],
         'error'  => null,
     ]);
 

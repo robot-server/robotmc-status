@@ -1,9 +1,13 @@
 <?php
 // config.ini 누락은 운영자 설정 문제이므로 페이지 자체가 안 뜨게 즉시 중단.
+require_once __DIR__ . '/lib/config.php';
 if (!file_exists(__DIR__ . '/config.ini')) {
     die('config.ini 파일이 없습니다. config.ini.sample을 config.ini로 복사하여 서버 IP 등을 수정하세요.');
 }
-$config = parse_ini_file(__DIR__ . '/config.ini');
+$config = config_load(__DIR__ . '/config.ini');
+if ($config === false) {
+    die('config.ini 파일을 읽지 못했습니다.');
+}
 $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 ?>
 <!DOCTYPE html>
@@ -60,10 +64,56 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         .is-fading {
             opacity: 0;
         }
+
+        .history-cell {
+            position: relative;
+            flex: 1 1 0;
+            min-width: 0;
+            height: 2.5rem;
+            border-radius: 2px;
+            background: #d4d4d8;
+        }
+        .dark .history-cell[data-color="gray"] {
+            background: #3f3f46;
+        }
+        .history-cell[data-color="green"] {
+            background: #22c55e;
+        }
+        .history-cell[data-color="yellow"] {
+            background: #facc15;
+        }
+        .history-cell[data-color="red"] {
+            background: #ef4444;
+        }
+        .history-cell .history-tip {
+            display: none;
+            position: absolute;
+            z-index: 30;
+            left: 50%;
+            bottom: calc(100% + 8px);
+            transform: translateX(-50%);
+            width: max-content;
+            padding: 0.5rem 0.625rem;
+            border-radius: 0.75rem;
+            background: #18181b;
+            color: #fafafa;
+            font-size: 0.75rem;
+            line-height: 1.45;
+            white-space: pre;
+            pointer-events: none;
+        }
+        .dark .history-cell .history-tip {
+            background: #fafafa;
+            color: #18181b;
+        }
+        .history-cell:hover .history-tip,
+        .history-cell.is-open .history-tip {
+            display: block;
+        }
     </style>
 </head>
 <body class="text-zinc-900 dark:text-white min-h-screen py-12 px-4">
-<div class="max-w-lg mx-auto">
+<div class="max-w-3xl mx-auto">
     <div class="text-center mb-10">
         <h1 class="text-4xl font-bold tracking-tight"><?= htmlspecialchars($SERVER_NAME) ?></h1>
         <p class="text-zinc-500 dark:text-zinc-400 mt-2">실시간 서버 상태</p>
@@ -144,6 +194,24 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                  style="width: 0%"></div>
         </div>
     </div>
+
+    <section id="history" class="mt-8" aria-labelledby="history-heading">
+        <div class="flex items-baseline justify-between gap-3 mb-3">
+            <h2 id="history-heading" class="text-sm font-medium text-zinc-700 dark:text-zinc-300">지난 90일</h2>
+            <p id="history-uptime" class="text-sm text-zinc-500 dark:text-zinc-400">—</p>
+        </div>
+        <div id="history-cells" class="flex gap-px" role="list" aria-label="지난 90일">
+            <?php for ($historyCell = 0; $historyCell < 90; $historyCell++): ?>
+                <div class="history-cell" data-color="gray" role="listitem"></div>
+            <?php endfor; ?>
+        </div>
+        <p id="history-empty" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">아직 기록이 없습니다</p>
+        <p id="history-last" class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">마지막 수집 없음</p>
+        <div id="history-incidents-wrap" class="mt-4 is-hidden">
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
+            <ul id="history-incidents" class="text-sm text-zinc-700 dark:text-zinc-300 space-y-1"></ul>
+        </div>
+    </section>
 
     <div class="text-center mt-8 text-zinc-500 dark:text-zinc-500 text-xs">
         30초마다 자동 갱신 • Ping 기반
@@ -362,7 +430,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         }
 
         try {
-            const res = await fetch('status.php', { cache: 'no-store' });
+            const res = await fetch('api/status.php', { cache: 'no-store' });
             const data = await res.json().catch(() => null);
 
             if (res.ok && data?.online) {
@@ -389,8 +457,199 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         }
     }
 
+    function formatUptime(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return '없음';
+        }
+        const number = Number(value);
+        const shown = number >= 100 ? 100 : Math.floor(number * 10 + 1e-8) / 10;
+        return Number.isInteger(shown) ? String(shown) : shown.toFixed(1);
+    }
+
+    function placeHistoryTip(cell) {
+        const tip = cell.querySelector('.history-tip');
+        if (!tip) {
+            return;
+        }
+        tip.style.left = '50%';
+        tip.style.transform = 'translateX(-50%)';
+        const wasHidden = window.getComputedStyle(tip).display === 'none';
+        if (wasHidden) {
+            tip.style.display = 'block';
+        }
+        const margin = 8;
+        const rect = tip.getBoundingClientRect();
+        let shift = 0;
+        if (rect.left < margin) {
+            shift = margin - rect.left;
+        } else if (rect.right > window.innerWidth - margin) {
+            shift = window.innerWidth - margin - rect.right;
+        }
+        tip.style.transform = 'translateX(calc(-50% + ' + shift + 'px))';
+        if (wasHidden) {
+            tip.style.display = '';
+        }
+    }
+
+    function formatKst(utcSql) {
+        if (!utcSql) {
+            return '없음';
+        }
+        const date = new Date(String(utcSql).replace(' ', 'T') + 'Z');
+        if (Number.isNaN(date.getTime())) {
+            return String(utcSql);
+        }
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Seoul',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hourCycle: 'h23'
+        }).formatToParts(date);
+        const part = (type) => parts.find((item) => item.type === type)?.value ?? '';
+        return part('year') + '-' + part('month') + '-' + part('day') + ' ' + part('hour') + ':' + part('minute');
+    }
+
+    function formatDuration(seconds) {
+        const total = Math.max(0, Math.trunc(Number(seconds) || 0));
+        if (total < 60) {
+            return total + '초';
+        }
+        const minutes = Math.floor(total / 60);
+        if (minutes < 60) {
+            const remain = total % 60;
+            return remain === 0 ? minutes + '분' : minutes + '분 ' + remain + '초';
+        }
+        const hours = Math.floor(minutes / 60);
+        const remainMinutes = minutes % 60;
+        return remainMinutes === 0 ? hours + '시간' : hours + '시간 ' + remainMinutes + '분';
+    }
+
+    function renderHistory(data) {
+        const cells = document.querySelectorAll('#history-cells .history-cell');
+        const days = Array.isArray(data?.days) ? data.days : [];
+        const allowed = { gray: true, green: true, yellow: true, red: true };
+        days.forEach((day, index) => {
+            const cell = cells[index];
+            if (!cell) {
+                return;
+            }
+            const color = allowed[day.color] ? day.color : 'gray';
+            cell.dataset.color = color;
+            const uptime = formatUptime(day.uptime);
+            const ping = day.avg_ping === null || day.avg_ping === undefined
+                ? '평균 핑 없음'
+                : '평균 핑 ' + Math.round(Number(day.avg_ping)) + 'ms';
+            const detail = [
+                String(day.date ?? ''),
+                '가동률 ' + (uptime === '없음' ? '없음' : uptime + '%'),
+                '샘플 ' + String(day.samples ?? 0),
+                ping
+            ].join('\n');
+            cell.removeAttribute('title');
+            cell.setAttribute('aria-label', detail);
+            let tip = cell.querySelector('.history-tip');
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.className = 'history-tip';
+                cell.appendChild(tip);
+            }
+            tip.textContent = detail;
+        });
+
+        const uptimeNode = document.getElementById('history-uptime');
+        if (uptimeNode) {
+            uptimeNode.textContent = data?.uptime === null || data?.uptime === undefined
+                ? '—'
+                : formatUptime(data.uptime) + '%';
+        }
+
+        const emptyNode = document.getElementById('history-empty');
+        if (emptyNode) {
+            emptyNode.classList.toggle('is-hidden', data?.empty !== true);
+        }
+
+        const lastNode = document.getElementById('history-last');
+        if (lastNode) {
+            lastNode.textContent = data?.last_checked_at
+                ? '마지막 수집 ' + formatKst(data.last_checked_at)
+                : '마지막 수집 없음';
+        }
+
+        const wrap = document.getElementById('history-incidents-wrap');
+        const list = document.getElementById('history-incidents');
+        if (wrap && list) {
+            list.replaceChildren();
+            const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
+            wrap.classList.toggle('is-hidden', incidents.length === 0);
+            incidents.forEach((incident) => {
+                const item = document.createElement('li');
+                item.textContent = formatKst(incident.start)
+                    + ' – '
+                    + formatKst(incident.end)
+                    + ' · '
+                    + formatDuration(incident.duration_seconds);
+                list.appendChild(item);
+            });
+        }
+    }
+
+    async function loadHistory() {
+        const emptyNode = document.getElementById('history-empty');
+        try {
+            const res = await fetch('api/history.php', { cache: 'no-store' });
+            if (!res.ok) {
+                if (emptyNode) {
+                    emptyNode.textContent = '기록을 불러오지 못했습니다';
+                    emptyNode.classList.remove('is-hidden');
+                }
+                return;
+            }
+            const data = await res.json().catch(() => null);
+            if (!data) {
+                return;
+            }
+            if (emptyNode && data.empty === true) {
+                emptyNode.textContent = '아직 기록이 없습니다';
+            }
+            renderHistory(data);
+        } catch (e) {
+            if (emptyNode) {
+                emptyNode.textContent = '기록을 불러오지 못했습니다';
+                emptyNode.classList.remove('is-hidden');
+            }
+        }
+    }
+
     loadStatus();
     setInterval(loadStatus, 30000);
+
+    try {
+        document.getElementById('history-cells')?.addEventListener('click', (event) => {
+            const cell = event.target.closest('.history-cell');
+            if (!cell) {
+                return;
+            }
+            const wasOpen = cell.classList.contains('is-open');
+            document.querySelectorAll('.history-cell.is-open').forEach((node) => node.classList.remove('is-open'));
+            if (!wasOpen) {
+                cell.classList.add('is-open');
+                placeHistoryTip(cell);
+            }
+        });
+        document.getElementById('history-cells')?.addEventListener('mouseover', (event) => {
+            const cell = event.target.closest('.history-cell');
+            if (cell) {
+                placeHistoryTip(cell);
+            }
+        });
+        loadHistory();
+        setInterval(loadHistory, 300000);
+    } catch (e) {
+        // 기록 UI 초기화 실패는 실시간 갱신을 멈추지 않는다.
+    }
 </script>
 </body>
 </html>

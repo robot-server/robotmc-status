@@ -1,0 +1,2 @@
+# 라이브러리는 PHP require로만 읽는다.
+Require all denied
