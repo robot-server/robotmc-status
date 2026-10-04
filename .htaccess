@@ -1,0 +1,4 @@
+# config.ini는 PHP가 파일로 읽는다. HTTP 요청은 403으로 끊는다.
+<FilesMatch "^config\.ini$">
+    Require all denied
+</FilesMatch>
