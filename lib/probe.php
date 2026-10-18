@@ -73,3 +73,22 @@ function probe_confirm(callable $probe, int $attempts): array
     }
     return $result;
 }
+
+/**
+ * 첫 조회가 실패하고 시도가 남아 있으면 $onDefer를 한 번 호출한 뒤 나머지를 조회한다.
+ * 수집은 그 자리에서 HTTP 응답을 끝내고, 호출처가 남은 조회를 기다리지 않게 한다.
+ *
+ * @param callable(): array{online: bool, ping: ?int, data: ?array, error: ?string} $probe
+ * @param callable(): void $onDefer
+ * @return array{online: bool, ping: ?int, data: ?array, error: ?string}
+ */
+function probe_confirm_deferred(callable $probe, int $attempts, callable $onDefer): array
+{
+    $attempts = max(1, $attempts);
+    $result = $probe();
+    if ($result['online'] || $attempts === 1) {
+        return $result;
+    }
+    $onDefer();
+    return probe_confirm($probe, $attempts - 1);
+}

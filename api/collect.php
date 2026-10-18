@@ -58,6 +58,34 @@ function collect_fail(string $error): void
     exit;
 }
 
+/** @param array<string, mixed> $payload */
+function collect_finish_request(array $payload): void
+{
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    if (!is_string($json)) {
+        $json = '{}';
+    }
+
+    ignore_user_abort(true);
+    @ini_set('zlib.output_compression', '0');
+    if (function_exists('apache_setenv')) {
+        @apache_setenv('no-gzip', '1');
+    }
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    header('Connection: close');
+    header('Content-Length: ' . strlen($json));
+    echo $json;
+    flush();
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+}
+
 /** @param array<string, mixed> $data */
 function collect_player_count(array $data, string $key): ?int
 {
@@ -85,6 +113,7 @@ if (!is_string($expected) || $expected === '' || $presented === '' || !hash_equa
 $body = null;
 $failure = null;
 $locked = false;
+$responded = false;
 try {
     $pdo = checks_pdo($config);
     checks_ensure_schema($pdo);
@@ -104,13 +133,15 @@ try {
             } else {
                 $port = (int) ($config['server_port'] ?? 25565);
                 $timeout = (float) ($config['timeout'] ?? 3);
-                // 호출 제한(약 5초)보다 오래 걸려도 확인된 결과를 남긴다.
-                ignore_user_abort(true);
-                $probe = probe_confirm(
+                $probe = probe_confirm_deferred(
                     static function () use ($host, $port, $timeout): array {
                         return probe_server($host, $port, $timeout);
                     },
-                    PROBE_CONFIRM_ATTEMPTS
+                    PROBE_CONFIRM_ATTEMPTS,
+                    static function () use (&$responded): void {
+                        $responded = true;
+                        collect_finish_request(['confirming' => true]);
+                    }
                 );
                 $data = is_array($probe['data']) ? $probe['data'] : [];
                 $ping = $probe['ping'];
@@ -122,16 +153,20 @@ try {
                     collect_player_count($data, 'online'),
                     collect_player_count($data, 'max')
                 );
-                $body = [
-                    'skipped' => false,
-                    'online' => (bool) $probe['online'],
-                ];
+                if (!$responded) {
+                    $body = [
+                        'skipped' => false,
+                        'online' => (bool) $probe['online'],
+                    ];
+                }
             }
         }
     }
 } catch (Throwable $e) {
     error_log($e->getMessage());
-    $failure = 'database unavailable';
+    if (!$responded) {
+        $failure = 'database unavailable';
+    }
 } finally {
     if ($locked) {
         try {
@@ -140,6 +175,10 @@ try {
             error_log($e->getMessage());
         }
     }
+}
+
+if ($responded) {
+    return;
 }
 
 if ($failure !== null) {
