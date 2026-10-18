@@ -110,6 +110,25 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         .history-cell.is-open .history-tip {
             display: block;
         }
+        .history-cell.has-incident {
+            cursor: pointer;
+        }
+        .history-cell.is-selected {
+            outline: 2px solid #18181b;
+            outline-offset: 1px;
+            z-index: 1;
+        }
+        .dark .history-cell.is-selected {
+            outline-color: #fafafa;
+        }
+        .history-cell:focus-visible {
+            outline: 2px solid #2563eb;
+            outline-offset: 1px;
+            z-index: 2;
+        }
+        .dark .history-cell:focus-visible {
+            outline-color: #93c5fd;
+        }
     </style>
 </head>
 <body class="text-zinc-900 dark:text-white min-h-screen py-12 px-4">
@@ -208,7 +227,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         <p id="history-empty" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">아직 기록이 없습니다</p>
         <p id="history-last" class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">마지막 수집 없음</p>
         <div id="history-incidents-wrap" class="mt-4 is-hidden">
-            <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
+            <p id="history-incidents-label" class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
             <ul id="history-incidents" class="text-sm text-zinc-700 dark:text-zinc-300 space-y-1"></ul>
         </div>
     </section>
@@ -491,6 +510,16 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         }
     }
 
+    const kstFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23'
+    });
+
     function formatKst(utcSql) {
         if (!utcSql) {
             return '없음';
@@ -499,15 +528,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         if (Number.isNaN(date.getTime())) {
             return String(utcSql);
         }
-        const parts = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'Asia/Seoul',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hourCycle: 'h23'
-        }).formatToParts(date);
+        const parts = kstFormatter.formatToParts(date);
         const part = (type) => parts.find((item) => item.type === type)?.value ?? '';
         return part('year') + '-' + part('month') + '-' + part('day') + ' ' + part('hour') + ':' + part('minute');
     }
@@ -527,9 +548,140 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         return remainMinutes === 0 ? hours + '시간' : hours + '시간 ' + remainMinutes + '분';
     }
 
+    let historyView = null;
+    let pinnedIncidentDate = null;
+    let incidentsByDate = new Map();
+
+    function kstDate(utcSql) {
+        return formatKst(utcSql).slice(0, 10);
+    }
+
+    function nextSeoulDate(isoDate) {
+        const [year, month, day] = isoDate.split('-').map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        date.setUTCDate(date.getUTCDate() + 1);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function indexIncidentsByDate(incidents) {
+        const byDate = new Map();
+        incidents.forEach((incident) => {
+            const start = kstDate(incident.start);
+            const end = kstDate(incident.end);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) {
+                return;
+            }
+            let cursor = start;
+            for (let guard = 0; guard < 120 && cursor <= end; guard++) {
+                const list = byDate.get(cursor);
+                if (list) {
+                    list.push(incident);
+                } else {
+                    byDate.set(cursor, [incident]);
+                }
+                if (cursor === end) {
+                    return;
+                }
+                const next = nextSeoulDate(cursor);
+                if (next <= cursor) {
+                    return;
+                }
+                cursor = next;
+            }
+        });
+        return byDate;
+    }
+
+    function incidentsOnDate(date) {
+        if (!date) {
+            return [];
+        }
+        return incidentsByDate.get(date) ?? [];
+    }
+
+    function chosenIncidentDate(days) {
+        if (pinnedIncidentDate) {
+            return incidentsOnDate(pinnedIncidentDate).length > 0 ? pinnedIncidentDate : null;
+        }
+        const today = days.length > 0 ? String(days[days.length - 1].date ?? '') : '';
+        return today && incidentsOnDate(today).length > 0 ? today : null;
+    }
+
+    function incidentCells() {
+        return [...document.querySelectorAll('#history-cells .history-cell.has-incident')];
+    }
+
+    function syncIncidentFocus() {
+        const cells = incidentCells();
+        document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
+            if (!cell.classList.contains('has-incident')) {
+                cell.removeAttribute('tabindex');
+            }
+        });
+        if (cells.length === 0) {
+            return;
+        }
+        const current = cells.find((cell) => cell.classList.contains('is-selected'))
+            || cells.find((cell) => cell.getAttribute('tabindex') === '0')
+            || cells[cells.length - 1];
+        cells.forEach((cell) => {
+            const tabIndex = cell === current ? '0' : '-1';
+            if (cell.getAttribute('tabindex') !== tabIndex) {
+                cell.tabIndex = Number(tabIndex);
+            }
+        });
+    }
+
+    function selectIncidentDate(date) {
+        if (!date || incidentsOnDate(date).length === 0) {
+            return;
+        }
+        pinnedIncidentDate = date;
+        renderIncidentSelection();
+    }
+
+    function renderIncidentSelection() {
+        const wrap = document.getElementById('history-incidents-wrap');
+        const list = document.getElementById('history-incidents');
+        const label = document.getElementById('history-incidents-label');
+        if (!wrap || !list) {
+            return;
+        }
+        const days = Array.isArray(historyView?.days) ? historyView.days : [];
+        const date = chosenIncidentDate(days);
+        document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
+            const selected = date !== null && cell.dataset.date === date;
+            cell.classList.toggle('is-selected', selected);
+            if (selected) {
+                cell.setAttribute('aria-current', 'date');
+            } else {
+                cell.removeAttribute('aria-current');
+            }
+        });
+        list.replaceChildren();
+        const shown = incidentsOnDate(date);
+        wrap.classList.toggle('is-hidden', shown.length === 0);
+        if (label && date) {
+            label.textContent = date + ' 끊긴 구간';
+        }
+        shown.forEach((incident) => {
+            const item = document.createElement('li');
+            item.textContent = formatKst(incident.start)
+                + ' – '
+                + formatKst(incident.end)
+                + ' · '
+                + formatDuration(incident.duration_seconds);
+            list.appendChild(item);
+        });
+        syncIncidentFocus();
+    }
+
     function renderHistory(data) {
+        historyView = data;
         const cells = document.querySelectorAll('#history-cells .history-cell');
         const days = Array.isArray(data?.days) ? data.days : [];
+        const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
+        incidentsByDate = indexIncidentsByDate(incidents);
         const allowed = { gray: true, green: true, yellow: true, red: true };
         days.forEach((day, index) => {
             const cell = cells[index];
@@ -538,6 +690,8 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             }
             const color = allowed[day.color] ? day.color : 'gray';
             cell.dataset.color = color;
+            cell.dataset.date = String(day.date ?? '');
+            cell.classList.toggle('has-incident', incidentsOnDate(cell.dataset.date).length > 0);
             const uptime = formatUptime(day.uptime);
             const ping = day.avg_ping === null || day.avg_ping === undefined
                 ? '평균 핑 없음'
@@ -558,6 +712,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             }
             tip.textContent = detail;
         });
+        for (let index = days.length; index < cells.length; index++) {
+            cells[index].dataset.date = '';
+            cells[index].classList.remove('has-incident');
+        }
 
         const uptimeNode = document.getElementById('history-uptime');
         if (uptimeNode) {
@@ -578,22 +736,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 : '마지막 수집 없음';
         }
 
-        const wrap = document.getElementById('history-incidents-wrap');
-        const list = document.getElementById('history-incidents');
-        if (wrap && list) {
-            list.replaceChildren();
-            const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
-            wrap.classList.toggle('is-hidden', incidents.length === 0);
-            incidents.forEach((incident) => {
-                const item = document.createElement('li');
-                item.textContent = formatKst(incident.start)
-                    + ' – '
-                    + formatKst(incident.end)
-                    + ' · '
-                    + formatDuration(incident.duration_seconds);
-                list.appendChild(item);
-            });
-        }
+        renderIncidentSelection();
     }
 
     async function loadHistory() {
@@ -638,6 +781,35 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 cell.classList.add('is-open');
                 placeHistoryTip(cell);
             }
+            if (cell.classList.contains('has-incident') && cell.dataset.date) {
+                selectIncidentDate(cell.dataset.date);
+            }
+        });
+        document.getElementById('history-cells')?.addEventListener('keydown', (event) => {
+            const cell = event.target.closest('.history-cell');
+            if (!cell || !cell.classList.contains('has-incident')) {
+                return;
+            }
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectIncidentDate(cell.dataset.date);
+                return;
+            }
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+                return;
+            }
+            const cells = incidentCells();
+            const index = cells.indexOf(cell);
+            if (index < 0) {
+                return;
+            }
+            const next = cells[index + (event.key === 'ArrowRight' ? 1 : -1)];
+            if (!next) {
+                return;
+            }
+            event.preventDefault();
+            selectIncidentDate(next.dataset.date);
+            next.focus();
         });
         document.getElementById('history-cells')?.addEventListener('mouseover', (event) => {
             const cell = event.target.closest('.history-cell');
