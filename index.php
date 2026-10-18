@@ -94,6 +94,17 @@ function index_refresh_bar(string $marginClass): void
             opacity: 0;
         }
 
+        .online-motd {
+            background: #1e1e1e;
+            color: #aaaaaa;
+            border-color: #3f3f46;
+        }
+
+        .motd-obfuscated {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            filter: blur(1.5px);
+        }
+
         .history-cell {
             position: relative;
             flex: 1 1 0;
@@ -281,7 +292,7 @@ function index_refresh_bar(string $marginClass): void
                     </div>
                 </div>
 
-                <div class="online-motd bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-200 dark:border-zinc-700"></div>
+                <div class="online-motd rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border"></div>
 
                 <div class="grid grid-cols-2 gap-6 mb-8">
                     <div>
@@ -357,6 +368,7 @@ function index_refresh_bar(string $marginClass): void
     <i id="theme-icon" class="fa-solid fa-moon text-lg"></i>
 </button>
 
+<script src="motd.js"></script>
 <script>
     const blockStates = new WeakMap();
 
@@ -465,24 +477,11 @@ function index_refresh_bar(string $marginClass): void
         });
     }
 
-    function cleanMotd(s) {
-        return (s || '')
-            .trim()
-            .replace(/[ \t]+/g, ' ')
-            .replace(/\n{3,}/g, '\n\n');
-    }
-
     function renderOnline(block, payload) {
         const d = payload.data || {};
         const players = d.players || {};
         const version = d.version || {};
-        const flatten = (c) => {
-            if (c == null) return '';
-            if (typeof c === 'string') return c;
-            if (typeof c !== 'object') return '';
-            return (c.text || '') + (Array.isArray(c.extra) ? c.extra.map(flatten).join('') : '');
-        };
-        block.querySelector('.online-motd').textContent = cleanMotd(flatten(d.description));
+        fillOnlineMotd(block.querySelector('.online-motd'), d.description);
         block.querySelector('.online-players-online').textContent = players.online ?? 0;
         block.querySelector('.online-players-max').textContent = players.max ?? 0;
         block.querySelector('.online-version').textContent = version.name || 'Unknown';
