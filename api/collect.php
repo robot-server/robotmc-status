@@ -104,7 +104,14 @@ try {
             } else {
                 $port = (int) ($config['server_port'] ?? 25565);
                 $timeout = (float) ($config['timeout'] ?? 3);
-                $probe = probe_server($host, $port, $timeout);
+                // 호출 제한(약 5초)보다 오래 걸려도 확인된 결과를 남긴다.
+                ignore_user_abort(true);
+                $probe = probe_confirm(
+                    static function () use ($host, $port, $timeout): array {
+                        return probe_server($host, $port, $timeout);
+                    },
+                    PROBE_CONFIRM_ATTEMPTS
+                );
                 $data = is_array($probe['data']) ? $probe['data'] : [];
                 $ping = $probe['ping'];
                 checks_insert(
