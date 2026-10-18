@@ -94,6 +94,11 @@ function index_refresh_bar(string $marginClass): void
             opacity: 0;
         }
 
+        .motd-obfuscated {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            filter: blur(1.5px);
+        }
+
         .history-cell {
             position: relative;
             flex: 1 1 0;
@@ -357,6 +362,7 @@ function index_refresh_bar(string $marginClass): void
     <i id="theme-icon" class="fa-solid fa-moon text-lg"></i>
 </button>
 
+<script src="motd.js"></script>
 <script>
     const blockStates = new WeakMap();
 
@@ -465,24 +471,11 @@ function index_refresh_bar(string $marginClass): void
         });
     }
 
-    function cleanMotd(s) {
-        return (s || '')
-            .trim()
-            .replace(/[ \t]+/g, ' ')
-            .replace(/\n{3,}/g, '\n\n');
-    }
-
     function renderOnline(block, payload) {
         const d = payload.data || {};
         const players = d.players || {};
         const version = d.version || {};
-        const flatten = (c) => {
-            if (c == null) return '';
-            if (typeof c === 'string') return c;
-            if (typeof c !== 'object') return '';
-            return (c.text || '') + (Array.isArray(c.extra) ? c.extra.map(flatten).join('') : '');
-        };
-        block.querySelector('.online-motd').textContent = cleanMotd(flatten(d.description));
+        fillOnlineMotd(block.querySelector('.online-motd'), d.description);
         block.querySelector('.online-players-online').textContent = players.online ?? 0;
         block.querySelector('.online-players-max').textContent = players.max ?? 0;
         block.querySelector('.online-version').textContent = version.name || 'Unknown';
