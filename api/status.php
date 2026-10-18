@@ -44,17 +44,49 @@ try {
     }
 
     require_once dirname(__DIR__) . '/lib/probe.php';
+    require_once dirname(__DIR__) . '/lib/store.php';
+    require_once dirname(__DIR__) . '/lib/servers.php';
 
-    $host    = (string) ($config['server_host'] ?? '');
-    $port    = (int)    ($config['server_port'] ?? 25565);
-    $timeout = (float)  ($config['timeout']     ?? 3);
-
-    if ($host === '') {
-        failApi('server_host is empty in config.ini');
+    try {
+        $pdo = checks_pdo($config);
+        checks_ensure_schema($pdo);
+        $servers = checks_servers($pdo);
+    } catch (Throwable $e) {
+        error_log($e->getMessage());
+        failApi('database unavailable');
+    }
+    if ($servers === []) {
+        failApi('no servers');
     }
 
-    // 실시간 조회는 수집과 같은 probe를 쓰지만 행을 넣지 않는다.
-    $result = probe_server($host, $port, $timeout);
+    $queryHost = null;
+    $queryPort = null;
+    if (array_key_exists('host', $_GET) || array_key_exists('port', $_GET)) {
+        $queryHost = isset($_GET['host']) && is_string($_GET['host']) ? trim($_GET['host']) : '';
+        $portRaw = $_GET['port'] ?? null;
+        if (is_int($portRaw) || (is_string($portRaw) && $portRaw !== '')) {
+            $queryPort = (int) $portRaw;
+        } else {
+            $queryPort = 0;
+        }
+    }
+    $server = servers_find($servers, $queryHost, $queryPort);
+    if ($server === null) {
+        http_response_code(404);
+        echo json_encode([
+            'online' => null,
+            'ping' => null,
+            'data' => null,
+            'error' => 'unknown server',
+            'timestamp' => date('Y-m-d H:i:s'),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $timeout = (float) ($config['timeout'] ?? 3);
+
+    // 실시간 조회는 수집과 같은 probe를 쓰지만 행을 넣지 않고, 요청한 서버만 한 번 본다.
+    $result = probe_server($server['host'], $server['port'], $timeout);
     if (!$result['online']) {
         failOffline($result['error'] ?? '서버에 연결할 수 없습니다.');
     }

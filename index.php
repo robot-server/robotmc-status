@@ -1,21 +1,50 @@
 <?php
 // config.ini 누락은 운영자 설정 문제이므로 페이지 자체가 안 뜨게 즉시 중단.
 require_once __DIR__ . '/lib/config.php';
+require_once __DIR__ . '/lib/store.php';
 if (!file_exists(__DIR__ . '/config.ini')) {
-    die('config.ini 파일이 없습니다. config.ini.sample을 config.ini로 복사하여 서버 IP 등을 수정하세요.');
+    die('config.ini 파일이 없습니다. config.ini.sample을 config.ini로 복사하여 데이터베이스와 collect_token을 설정하세요.');
 }
 $config = config_load(__DIR__ . '/config.ini');
 if ($config === false) {
     die('config.ini 파일을 읽지 못했습니다.');
 }
-$SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
+try {
+    $pdo = checks_pdo($config);
+    checks_ensure_schema($pdo);
+    $servers = checks_servers($pdo);
+} catch (Throwable $e) {
+    error_log($e->getMessage());
+    die('서버 목록을 불러오지 못했습니다.');
+}
+$requestedId = null;
+if (isset($_GET['id']) && is_string($_GET['id']) && preg_match('/^\d+$/', $_GET['id']) === 1) {
+    $requestedId = (int) $_GET['id'];
+}
+$selected = servers_pick($servers, $requestedId);
+$multiple = count($servers) > 1;
+$heading = $selected === null ? '서버 상태' : $selected['name'];
+
+function index_h(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+function index_refresh_bar(string $marginClass): void
+{
+    echo '<div id="progress-container" class="' . index_h($marginClass) . ' hidden">' . "\n";
+    echo '        <div class="h-[2px] bg-zinc-200 dark:bg-zinc-800">' . "\n";
+    echo '            <div id="refresh-progress" class="h-full w-0 bg-zinc-400 dark:bg-zinc-500" style="width: 0%"></div>' . "\n";
+    echo '        </div>' . "\n";
+    echo '    </div>' . "\n";
+}
 ?>
 <!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($SERVER_NAME) ?> - 서버 상태</title>
+    <title><?= $selected === null ? '서버 상태' : index_h($heading) . ' - 서버 상태' ?></title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
     <script>
@@ -129,115 +158,199 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         .dark .history-cell:focus-visible {
             outline-color: #93c5fd;
         }
+        .server-drawer[hidden] {
+            display: none;
+        }
+        .server-drawer {
+            position: fixed;
+            inset: 0;
+            z-index: 60;
+        }
+        .server-drawer-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgb(0 0 0 / 0.45);
+        }
+        .server-drawer-panel {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            max-height: 70vh;
+            overflow: auto;
+            padding: 0.75rem 1rem calc(1.25rem + env(safe-area-inset-bottom));
+            border-radius: 1.5rem 1.5rem 0 0;
+            background: #fff;
+        }
+        .dark .server-drawer-panel {
+            background: #18181b;
+        }
     </style>
 </head>
 <body class="text-zinc-900 dark:text-white min-h-screen py-12 px-4">
 <div class="max-w-3xl mx-auto">
     <div class="text-center mb-10">
-        <h1 class="text-4xl font-bold tracking-tight"><?= htmlspecialchars($SERVER_NAME) ?></h1>
+        <?php if ($multiple && $selected !== null): ?>
+        <button type="button" id="server-drawer-open" class="inline-flex items-center justify-center gap-2" aria-expanded="false" aria-controls="server-drawer">
+            <h1 class="text-4xl font-bold tracking-tight"><?= index_h($heading) ?></h1>
+            <i class="fa-solid fa-chevron-down text-xl text-zinc-400" aria-hidden="true"></i>
+        </button>
+        <?php else: ?>
+        <h1 class="text-4xl font-bold tracking-tight"><?= index_h($heading) ?></h1>
+        <?php endif; ?>
         <p class="text-zinc-500 dark:text-zinc-400 mt-2">실시간 서버 상태</p>
     </div>
 
-    <div id="status-card" class="card bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-200 dark:border-zinc-800">
-
-        <!-- 로딩 -->
-        <div id="status-loading" class="status-section text-center py-16">
-            <i class="fa-solid fa-circle-notch fa-spin text-6xl text-zinc-500 dark:text-zinc-400 mb-6"></i>
-            <p class="text-zinc-500 dark:text-zinc-400">서버 상태 확인 중…</p>
+    <?php if ($multiple && $selected !== null): ?>
+    <div id="server-drawer" class="server-drawer" hidden>
+        <button type="button" class="server-drawer-backdrop" aria-label="닫기"></button>
+        <div class="server-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="server-drawer-title">
+            <h2 id="server-drawer-title" class="sr-only">서버 선택</h2>
+            <ul class="max-w-3xl mx-auto">
+                <?php foreach ($servers as $server): ?>
+                <?php $serverFavicon = $server['favicon'] ?? null; ?>
+                <li>
+                    <a class="flex items-center gap-3 rounded-2xl px-3 py-3 hover:bg-zinc-100 dark:hover:bg-zinc-800" href="?id=<?= (int) $server['id'] ?>">
+                        <?php if (is_string($serverFavicon) && $serverFavicon !== ''): ?>
+                        <img class="h-12 w-12 rounded-xl border border-zinc-200 dark:border-zinc-700" src="<?= index_h($serverFavicon) ?>" alt="">
+                        <?php else: ?>
+                        <span class="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-zinc-400 dark:bg-zinc-800" aria-hidden="true">
+                            <i class="fa-solid fa-server"></i>
+                        </span>
+                        <?php endif; ?>
+                        <span class="text-lg font-medium"><?= index_h($server['name']) ?></span>
+                        <?php if ((int) $server['id'] === (int) $selected['id']): ?>
+                        <i class="fa-solid fa-check ml-auto text-zinc-500" aria-label="선택됨"></i>
+                        <?php endif; ?>
+                    </a>
+                </li>
+                <?php endforeach; ?>
+            </ul>
         </div>
+    </div>
+    <script>
+        (function () {
+            const openButton = document.getElementById('server-drawer-open');
+            const drawer = document.getElementById('server-drawer');
+            if (!openButton || !drawer) {
+                return;
+            }
+            const closeDrawer = () => {
+                drawer.hidden = true;
+                openButton.setAttribute('aria-expanded', 'false');
+            };
+            openButton.addEventListener('click', () => {
+                const willOpen = drawer.hidden;
+                drawer.hidden = !willOpen;
+                openButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            });
+            drawer.querySelector('.server-drawer-backdrop').addEventListener('click', closeDrawer);
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeDrawer();
+                }
+            });
+        })();
+    </script>
+    <?php endif; ?>
 
-        <!-- 온라인 -->
-        <div id="status-online" class="status-section is-hidden is-fading">
-            <div class="mb-6 flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <div class="w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
-                    <span class="text-3xl font-bold text-green-600 dark:text-green-400">온라인</span>
-                </div>
-                <!-- 백그라운드 갱신 인디케이터 (온라인 상태일 때만) -->
-                <div id="refresh-indicator" class="hidden text-zinc-500 dark:text-zinc-400">
-                    <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
-                </div>
+    <?php if ($servers === []): ?>
+    <p class="empty-servers text-center text-zinc-500 dark:text-zinc-400">등록된 서버가 없습니다</p>
+    <?php endif; ?>
+
+    <?php if ($selected !== null): ?>
+    <?php $server = $selected; ?>
+    <section class="server-block"
+             data-id="<?= (int) $server['id'] ?>"
+             data-host="<?= index_h($server['host']) ?>"
+             data-port="<?= (int) $server['port'] ?>">
+        <div class="status-card card bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-2xl border border-zinc-200 dark:border-zinc-800">
+            <div class="status-section text-center py-16" data-section="loading">
+                <i class="fa-solid fa-circle-notch fa-spin text-6xl text-zinc-500 dark:text-zinc-400 mb-6"></i>
+                <p class="text-zinc-500 dark:text-zinc-400">서버 상태 확인 중…</p>
             </div>
 
-            <div id="online-motd"
-                 class="bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-200 dark:border-zinc-700"></div>
-
-            <div class="grid grid-cols-2 gap-6 mb-8">
-                <div>
-                    <p class="text-zinc-500 dark:text-zinc-400 text-sm">접속자</p>
-                    <p class="text-5xl font-bold text-zinc-900 dark:text-white">
-                        <span id="online-players-online">0</span><span class="text-2xl text-zinc-500 dark:text-zinc-500"> / <span id="online-players-max">0</span></span>
-                    </p>
-                </div>
-                <div>
-                    <p class="text-zinc-500 dark:text-zinc-400 text-sm">버전</p>
-                    <p id="online-version" class="text-xl font-medium text-zinc-900 dark:text-white">Unknown</p>
-                </div>
-            </div>
-
-            <div id="online-sample-wrap" class="mb-8 is-hidden">
-                <p class="text-zinc-500 dark:text-zinc-400 text-sm mb-3">현재 접속 중</p>
-                <div id="online-sample" class="flex flex-wrap gap-2"></div>
-            </div>
-
-            <div id="online-favicon-wrap" class="flex justify-center mb-6 is-hidden">
-                <img id="online-favicon" class="w-28 h-28 rounded-2xl border-4 border-zinc-200 dark:border-zinc-700 shadow-inner" alt="서버 아이콘">
-            </div>
-
-            <div class="text-center text-zinc-500 dark:text-zinc-500 text-sm pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                핑 <span id="online-ping">-</span>ms • <span id="online-timestamp">-</span>
-            </div>
-        </div>
-
-        <!-- 오프라인 -->
-        <div id="status-offline" class="status-section is-hidden is-fading">
-            <div class="py-16 text-center">
-                <i class="fa-solid fa-server text-7xl text-red-500/80 mb-6"></i>
-                <div class="mb-3 flex items-center justify-center gap-3">
-                    <h2 class="text-3xl font-bold text-red-500 dark:text-red-400">서버가 오프라인입니다</h2>
-                    <!-- 백그라운드 갱신 인디케이터 (오프라인 상태일 때) -->
-                    <div id="refresh-indicator-offline" class="hidden text-zinc-500 dark:text-zinc-400">
+            <div class="status-section is-hidden is-fading" data-section="online">
+                <div class="mb-6 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
+                        <span class="text-3xl font-bold text-green-600 dark:text-green-400">온라인</span>
+                    </div>
+                    <div class="refresh-indicator hidden text-zinc-500 dark:text-zinc-400">
                         <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
                     </div>
                 </div>
-                <p id="offline-message" class="text-zinc-500 dark:text-zinc-400">연결할 수 없습니다.</p>
+
+                <div class="online-motd bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-200 dark:border-zinc-700"></div>
+
+                <div class="grid grid-cols-2 gap-6 mb-8">
+                    <div>
+                        <p class="text-zinc-500 dark:text-zinc-400 text-sm">접속자</p>
+                        <p class="text-5xl font-bold text-zinc-900 dark:text-white">
+                            <span class="online-players-online">0</span><span class="text-2xl text-zinc-500 dark:text-zinc-500"> / <span class="online-players-max">0</span></span>
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-zinc-500 dark:text-zinc-400 text-sm">버전</p>
+                        <p class="online-version text-xl font-medium text-zinc-900 dark:text-white">Unknown</p>
+                    </div>
+                </div>
+
+                <div class="online-sample-wrap mb-8 is-hidden">
+                    <p class="text-zinc-500 dark:text-zinc-400 text-sm mb-3">현재 접속 중</p>
+                    <div class="online-sample flex flex-wrap gap-2"></div>
+                </div>
+
+                <div class="online-favicon-wrap flex justify-center mb-6 is-hidden">
+                    <img class="online-favicon w-28 h-28 rounded-2xl border-4 border-zinc-200 dark:border-zinc-700 shadow-inner" alt="서버 아이콘">
+                </div>
+
+                <div class="text-center text-zinc-500 dark:text-zinc-500 text-sm pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                    핑 <span class="online-ping">-</span>ms • <span class="online-timestamp">-</span>
+                </div>
+            </div>
+
+            <div class="status-section is-hidden is-fading" data-section="offline">
+                <div class="py-16 text-center">
+                    <i class="fa-solid fa-server text-7xl text-red-500/80 mb-6"></i>
+                    <div class="mb-3 flex items-center justify-center gap-3">
+                        <h2 class="text-3xl font-bold text-red-500 dark:text-red-400">서버가 오프라인입니다</h2>
+                        <div class="refresh-indicator-offline hidden text-zinc-500 dark:text-zinc-400">
+                            <i class="fa-solid fa-rotate fa-spin text-3xl"></i>
+                        </div>
+                    </div>
+                    <p class="offline-message text-zinc-500 dark:text-zinc-400">연결할 수 없습니다.</p>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Progress Bar (카드 바깥 + 카드와 동일 너비) -->
-    <div id="progress-container" class="mt-3 hidden">
-        <div class="h-[2px] bg-zinc-200 dark:bg-zinc-800">
-            <div id="refresh-progress"
-                 class="h-full w-0 bg-zinc-400 dark:bg-zinc-500"
-                 style="width: 0%"></div>
-        </div>
-    </div>
+        <?php index_refresh_bar('mt-3'); ?>
 
-    <section id="history" class="mt-8" aria-labelledby="history-heading">
-        <div class="flex items-baseline justify-between gap-3 mb-3">
-            <h2 id="history-heading" class="text-sm font-medium text-zinc-700 dark:text-zinc-300">지난 90일</h2>
-            <p id="history-uptime" class="text-sm text-zinc-500 dark:text-zinc-400">—</p>
-        </div>
-        <div id="history-cells" class="flex gap-px" role="list" aria-label="지난 90일">
-            <?php for ($historyCell = 0; $historyCell < 90; $historyCell++): ?>
-                <div class="history-cell" data-color="gray" role="listitem"></div>
-            <?php endfor; ?>
-        </div>
-        <p id="history-empty" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">아직 기록이 없습니다</p>
-        <p id="history-last" class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">마지막 수집 없음</p>
-        <div id="history-incidents-wrap" class="mt-4 is-hidden">
-            <p id="history-incidents-label" class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
-            <ul id="history-incidents" class="text-sm text-zinc-700 dark:text-zinc-300 space-y-1"></ul>
-        </div>
+        <section class="history mt-8" aria-labelledby="history-heading">
+            <div class="flex items-baseline justify-between gap-3 mb-3">
+                <h2 id="history-heading" class="text-sm font-medium text-zinc-700 dark:text-zinc-300">지난 90일</h2>
+                <p class="history-uptime text-sm text-zinc-500 dark:text-zinc-400">—</p>
+            </div>
+            <div class="history-cells flex gap-px" role="list" aria-label="지난 90일">
+                <?php for ($historyCell = 0; $historyCell < 90; $historyCell++): ?>
+                    <div class="history-cell" data-color="gray" role="listitem"></div>
+                <?php endfor; ?>
+            </div>
+            <p class="history-empty mt-3 text-sm text-zinc-500 dark:text-zinc-400">아직 기록이 없습니다</p>
+            <p class="history-last mt-2 text-xs text-zinc-500 dark:text-zinc-400">마지막 수집 없음</p>
+            <div class="history-incidents-wrap mt-4 is-hidden">
+                <p class="history-incidents-label text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
+                <ul class="history-incidents text-sm text-zinc-700 dark:text-zinc-300 space-y-1"></ul>
+            </div>
+        </section>
     </section>
+    <?php endif; ?>
 
     <div class="text-center mt-8 text-zinc-500 dark:text-zinc-500 text-xs">
         30초마다 자동 갱신 • Ping 기반
     </div>
 </div>
 
-<!-- 테마 토글 (화면 오른쪽 위 고정) -->
 <button id="theme-toggle"
         class="fixed top-4 right-4 z-50 w-10 h-10 flex items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 shadow-sm border border-zinc-200 dark:border-zinc-700 transition-all active:scale-95"
         aria-label="테마 전환">
@@ -245,35 +358,32 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 </button>
 
 <script>
-    const sections = {
-        loading: document.getElementById('status-loading'),
-        online:  document.getElementById('status-online'),
-        offline: document.getElementById('status-offline'),
-    };
+    const blockStates = new WeakMap();
 
-    let isInitialLoad = true;
+    function blockState(block) {
+        let state = blockStates.get(block);
+        if (!state) {
+            state = { initial: true, pinned: null, incidents: new Map(), view: null };
+            blockStates.set(block, state);
+        }
+        return state;
+    }
+
+    const refreshIndicatorSelector = '.refresh-indicator, .refresh-indicator-offline';
+    const progressBar = document.getElementById('refresh-progress');
+    const progressContainer = document.getElementById('progress-container');
+    const CYCLE_DURATION = 30000;
     let cycleStartTime = null;
     let rafId = null;
 
-    const refreshIndicatorOnline = document.getElementById('refresh-indicator');
-    const refreshIndicatorOffline = document.getElementById('refresh-indicator-offline');
-    const progressBar = document.getElementById('refresh-progress');
-    const progressContainer = document.getElementById('progress-container');
-
-    const CYCLE_DURATION = 30000; // 30초
-
-    // ===== 테마 관리 (3-state: system / light / dark) =====
     function initTheme() {
         const toggleBtn = document.getElementById('theme-toggle');
         const icon = document.getElementById('theme-icon');
-
         const THEME_ORDER = ['system', 'light', 'dark'];
 
         function updateIcon(mode) {
             if (!icon || !toggleBtn) return;
-
             icon.classList.remove('fa-sun', 'fa-moon', 'fa-circle-half-stroke');
-
             if (mode === 'light') {
                 icon.classList.add('fa-sun');
                 toggleBtn.title = '라이트 모드 (클릭하여 변경)';
@@ -289,17 +399,14 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         function applyTheme(mode) {
             const isDark = mode === 'dark' ||
                 (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
             document.documentElement.classList.toggle('dark', isDark);
             localStorage.setItem('theme', mode);
             updateIcon(mode);
         }
 
-        // 초기 테마 적용
         const saved = localStorage.getItem('theme') || 'system';
         applyTheme(saved);
 
-        // 클릭 시 순환: system → light → dark → system
         toggleBtn?.addEventListener('click', () => {
             const current = localStorage.getItem('theme') || 'system';
             const currentIndex = THEME_ORDER.indexOf(current);
@@ -307,7 +414,6 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             applyTheme(next);
         });
 
-        // 시스템 설정 변경 시 (현재 'system' 모드일 때만 반영)
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         mediaQuery.addEventListener('change', () => {
             if ((localStorage.getItem('theme') || 'system') === 'system') {
@@ -316,26 +422,23 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         });
     }
 
-    // 테마 초기화 실패가 페이지 전체 로딩을 막지 않도록 보호
     try {
         initTheme();
     } catch (e) {
         console.error('테마 초기화 실패:', e);
     }
 
-    function showRefreshIndicator(show) {
-        const action = show ? 'remove' : 'add';
-        refreshIndicatorOnline?.classList[action]('hidden');
-        refreshIndicatorOffline?.classList[action]('hidden');
+    function showRefreshIndicator(block, show) {
+        block.querySelectorAll(refreshIndicatorSelector).forEach((node) => {
+            node.classList.toggle('hidden', !show);
+        });
     }
 
     function updateProgress() {
         if (!cycleStartTime || !progressBar) return;
-
         const elapsed = Date.now() - cycleStartTime;
         const progress = Math.min((elapsed / CYCLE_DURATION) * 100, 100);
         progressBar.style.width = `${progress}%`;
-
         if (progress < 100) {
             rafId = requestAnimationFrame(updateProgress);
         }
@@ -350,24 +453,18 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         rafId = requestAnimationFrame(updateProgress);
     }
 
-    function showSection(name) {
-        for (const [key, el] of Object.entries(sections)) {
-            if (key === name) {
+    function showSection(block, name) {
+        block.querySelectorAll('.status-section').forEach((el) => {
+            if (el.dataset.section === name) {
                 el.classList.remove('is-hidden');
-                // 다음 프레임에 fade-in 트리거
                 requestAnimationFrame(() => el.classList.remove('is-fading'));
             } else {
                 el.classList.add('is-fading');
                 el.classList.add('is-hidden');
             }
-        }
+        });
     }
 
-    function showLoading() {
-        showSection('loading');
-    }
-
-    // MOTD 정리: 앞뒤 공백, 연속 공백, 과도한 빈 줄
     function cleanMotd(s) {
         return (s || '')
             .trim()
@@ -375,29 +472,25 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             .replace(/\n{3,}/g, '\n\n');
     }
 
-    function renderOnline(payload) {
+    function renderOnline(block, payload) {
         const d = payload.data || {};
         const players = d.players || {};
         const version = d.version || {};
-
-        // description은 표준 SLP Chat Component: string 또는 {text, extra:[...]} 트리.
-        // 일부 서버는 최상위 text를 비우고 extra에만 내용을 담으므로 재귀로 평탄화.
         const flatten = (c) => {
             if (c == null) return '';
             if (typeof c === 'string') return c;
             if (typeof c !== 'object') return '';
             return (c.text || '') + (Array.isArray(c.extra) ? c.extra.map(flatten).join('') : '');
         };
-        document.getElementById('online-motd').textContent = cleanMotd(flatten(d.description));
-        document.getElementById('online-players-online').textContent = players.online ?? 0;
-        document.getElementById('online-players-max').textContent    = players.max ?? 0;
-        document.getElementById('online-version').textContent        = version.name || 'Unknown';
-        document.getElementById('online-ping').textContent           = payload.ping ?? '-';
-        document.getElementById('online-timestamp').textContent      = payload.timestamp || '-';
+        block.querySelector('.online-motd').textContent = cleanMotd(flatten(d.description));
+        block.querySelector('.online-players-online').textContent = players.online ?? 0;
+        block.querySelector('.online-players-max').textContent = players.max ?? 0;
+        block.querySelector('.online-version').textContent = version.name || 'Unknown';
+        block.querySelector('.online-ping').textContent = payload.ping ?? '-';
+        block.querySelector('.online-timestamp').textContent = payload.timestamp || '-';
 
-        // sample은 표준 SLP로 [{name, id, ...}, ...] 형태
-        const sampleWrap = document.getElementById('online-sample-wrap');
-        const sample = document.getElementById('online-sample');
+        const sampleWrap = block.querySelector('.online-sample-wrap');
+        const sample = block.querySelector('.online-sample');
         sample.replaceChildren();
         if (Array.isArray(players.sample)) {
             for (const p of players.sample) {
@@ -409,15 +502,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 sample.appendChild(chip);
             }
         }
-        if (sample.children.length > 0) {
-            sampleWrap.classList.remove('is-hidden');
-        } else {
-            sampleWrap.classList.add('is-hidden');
-        }
+        sampleWrap.classList.toggle('is-hidden', sample.children.length === 0);
 
-        // favicon은 data: URI만 신뢰 (XSS 방지)
-        const faviconWrap = document.getElementById('online-favicon-wrap');
-        const favicon = document.getElementById('online-favicon');
+        const faviconWrap = block.querySelector('.online-favicon-wrap');
+        const favicon = block.querySelector('.online-favicon');
         if (typeof d.favicon === 'string' && d.favicon.startsWith('data:image/')) {
             favicon.src = d.favicon;
             faviconWrap.classList.remove('is-hidden');
@@ -426,54 +514,56 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             faviconWrap.classList.add('is-hidden');
         }
 
-        showSection('online');
+        showSection(block, 'online');
     }
 
-    function renderOffline(msg) {
-        document.getElementById('offline-message').textContent = msg || '연결할 수 없습니다.';
-        showSection('offline');
+    function renderOffline(block, msg) {
+        block.querySelector('.offline-message').textContent = msg || '연결할 수 없습니다.';
+        showSection(block, 'offline');
     }
 
-    async function loadStatus() {
-        const wasInitialLoad = isInitialLoad;
-
-        // Progress Bar 사이클을 loadStatus 시작 시점에 맞춰 시작
-        // (실제 30초 폴링 주기와 정확히 동기화되도록)
-        startRefreshCycle();
-
-        if (wasInitialLoad) {
-            showLoading();
+    async function loadBlockStatus(block) {
+        const state = blockState(block);
+        const initial = state.initial;
+        if (initial) {
+            showSection(block, 'loading');
         } else {
-            // 백그라운드 갱신일 때만 미묘한 인디케이터 표시
-            showRefreshIndicator(true);
+            showRefreshIndicator(block, true);
         }
 
         try {
-            const res = await fetch('api/status.php', { cache: 'no-store' });
+            const params = new URLSearchParams({
+                host: block.dataset.host || '',
+                port: block.dataset.port || ''
+            });
+            const res = await fetch('api/status.php?' + params.toString(), { cache: 'no-store' });
             const data = await res.json().catch(() => null);
 
             if (res.ok && data?.online) {
-                renderOnline(data);
+                renderOnline(block, data);
             } else {
-                // res.ok=false → API 인프라 예외 (HTTP 500)
-                // data.online=false → MC 서버 오프라인/timeout
                 const msg = res.ok
                     ? (data?.error || '서버에 연결할 수 없습니다.')
                     : '상태를 가져오지 못했습니다. 잠시 후 다시 시도해주세요.';
-                renderOffline(msg);
+                renderOffline(block, msg);
             }
 
-            if (res.ok && data && wasInitialLoad) {
-                // 최초 성공 시 Progress Bar 표시
+            if (res.ok && data && initial) {
                 progressContainer?.classList.remove('hidden');
             }
         } catch (e) {
-            // 네트워크 단절·DNS 실패 등
-            renderOffline('상태를 가져오지 못했습니다.');
+            renderOffline(block, '상태를 가져오지 못했습니다.');
         } finally {
-            isInitialLoad = false;
-            showRefreshIndicator(false);
+            state.initial = false;
+            showRefreshIndicator(block, false);
         }
+    }
+
+    function loadStatus() {
+        startRefreshCycle();
+        document.querySelectorAll('.server-block').forEach((block) => {
+            loadBlockStatus(block);
+        });
     }
 
     function formatUptime(value) {
@@ -548,10 +638,6 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         return remainMinutes === 0 ? hours + '시간' : hours + '시간 ' + remainMinutes + '분';
     }
 
-    let historyView = null;
-    let pinnedIncidentDate = null;
-    let incidentsByDate = new Map();
-
     function kstDate(utcSql) {
         return formatKst(utcSql).slice(0, 10);
     }
@@ -592,28 +678,28 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         return byDate;
     }
 
-    function incidentsOnDate(date) {
+    function incidentsOnDate(state, date) {
         if (!date) {
             return [];
         }
-        return incidentsByDate.get(date) ?? [];
+        return state.incidents.get(date) ?? [];
     }
 
-    function chosenIncidentDate(days) {
-        if (pinnedIncidentDate) {
-            return incidentsOnDate(pinnedIncidentDate).length > 0 ? pinnedIncidentDate : null;
+    function chosenIncidentDate(state, days) {
+        if (state.pinned) {
+            return incidentsOnDate(state, state.pinned).length > 0 ? state.pinned : null;
         }
         const today = days.length > 0 ? String(days[days.length - 1].date ?? '') : '';
-        return today && incidentsOnDate(today).length > 0 ? today : null;
+        return today && incidentsOnDate(state, today).length > 0 ? today : null;
     }
 
-    function incidentCells() {
-        return [...document.querySelectorAll('#history-cells .history-cell.has-incident')];
+    function incidentCells(block) {
+        return [...block.querySelectorAll('.history-cells .history-cell.has-incident')];
     }
 
-    function syncIncidentFocus() {
-        const cells = incidentCells();
-        document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
+    function syncIncidentFocus(block) {
+        const cells = incidentCells(block);
+        block.querySelectorAll('.history-cells .history-cell').forEach((cell) => {
             if (!cell.classList.contains('has-incident')) {
                 cell.removeAttribute('tabindex');
             }
@@ -632,24 +718,26 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         });
     }
 
-    function selectIncidentDate(date) {
-        if (!date || incidentsOnDate(date).length === 0) {
+    function selectIncidentDate(block, date) {
+        const state = blockState(block);
+        if (!date || incidentsOnDate(state, date).length === 0) {
             return;
         }
-        pinnedIncidentDate = date;
-        renderIncidentSelection();
+        state.pinned = date;
+        renderIncidentSelection(block);
     }
 
-    function renderIncidentSelection() {
-        const wrap = document.getElementById('history-incidents-wrap');
-        const list = document.getElementById('history-incidents');
-        const label = document.getElementById('history-incidents-label');
+    function renderIncidentSelection(block) {
+        const state = blockState(block);
+        const wrap = block.querySelector('.history-incidents-wrap');
+        const list = block.querySelector('.history-incidents');
+        const label = block.querySelector('.history-incidents-label');
         if (!wrap || !list) {
             return;
         }
-        const days = Array.isArray(historyView?.days) ? historyView.days : [];
-        const date = chosenIncidentDate(days);
-        document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
+        const days = Array.isArray(state.view?.days) ? state.view.days : [];
+        const date = chosenIncidentDate(state, days);
+        block.querySelectorAll('.history-cells .history-cell').forEach((cell) => {
             const selected = date !== null && cell.dataset.date === date;
             cell.classList.toggle('is-selected', selected);
             if (selected) {
@@ -659,7 +747,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             }
         });
         list.replaceChildren();
-        const shown = incidentsOnDate(date);
+        const shown = incidentsOnDate(state, date);
         wrap.classList.toggle('is-hidden', shown.length === 0);
         if (label && date) {
             label.textContent = date + ' 끊긴 구간';
@@ -673,15 +761,16 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 + formatDuration(incident.duration_seconds);
             list.appendChild(item);
         });
-        syncIncidentFocus();
+        syncIncidentFocus(block);
     }
 
-    function renderHistory(data) {
-        historyView = data;
-        const cells = document.querySelectorAll('#history-cells .history-cell');
+    function renderHistory(block, data) {
+        const state = blockState(block);
+        state.view = data;
+        const cells = block.querySelectorAll('.history-cells .history-cell');
         const days = Array.isArray(data?.days) ? data.days : [];
         const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
-        incidentsByDate = indexIncidentsByDate(incidents);
+        state.incidents = indexIncidentsByDate(incidents);
         const allowed = { gray: true, green: true, yellow: true, red: true };
         days.forEach((day, index) => {
             const cell = cells[index];
@@ -691,7 +780,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             const color = allowed[day.color] ? day.color : 'gray';
             cell.dataset.color = color;
             cell.dataset.date = String(day.date ?? '');
-            cell.classList.toggle('has-incident', incidentsOnDate(cell.dataset.date).length > 0);
+            cell.classList.toggle('has-incident', incidentsOnDate(state, cell.dataset.date).length > 0);
             const uptime = formatUptime(day.uptime);
             const ping = day.avg_ping === null || day.avg_ping === undefined
                 ? '평균 핑 없음'
@@ -717,52 +806,64 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             cells[index].classList.remove('has-incident');
         }
 
-        const uptimeNode = document.getElementById('history-uptime');
+        const uptimeNode = block.querySelector('.history-uptime');
         if (uptimeNode) {
             uptimeNode.textContent = data?.uptime === null || data?.uptime === undefined
                 ? '—'
                 : formatUptime(data.uptime) + '%';
         }
 
-        const emptyNode = document.getElementById('history-empty');
+        const emptyNode = block.querySelector('.history-empty');
         if (emptyNode) {
             emptyNode.classList.toggle('is-hidden', data?.empty !== true);
         }
 
-        const lastNode = document.getElementById('history-last');
+        const lastNode = block.querySelector('.history-last');
         if (lastNode) {
             lastNode.textContent = data?.last_checked_at
                 ? '마지막 수집 ' + formatKst(data.last_checked_at)
                 : '마지막 수집 없음';
         }
 
-        renderIncidentSelection();
+        renderIncidentSelection(block);
+    }
+
+    function showHistoryError(block) {
+        const emptyNode = block.querySelector('.history-empty');
+        if (emptyNode) {
+            emptyNode.textContent = '기록을 불러오지 못했습니다';
+            emptyNode.classList.remove('is-hidden');
+        }
     }
 
     async function loadHistory() {
-        const emptyNode = document.getElementById('history-empty');
+        const blocks = [...document.querySelectorAll('.server-block')];
         try {
             const res = await fetch('api/history.php', { cache: 'no-store' });
             if (!res.ok) {
-                if (emptyNode) {
-                    emptyNode.textContent = '기록을 불러오지 못했습니다';
-                    emptyNode.classList.remove('is-hidden');
-                }
+                blocks.forEach((block) => showHistoryError(block));
                 return;
             }
             const data = await res.json().catch(() => null);
-            if (!data) {
+            const servers = Array.isArray(data?.servers) ? data.servers : null;
+            if (!servers) {
+                blocks.forEach((block) => showHistoryError(block));
                 return;
             }
-            if (emptyNode && data.empty === true) {
-                emptyNode.textContent = '아직 기록이 없습니다';
-            }
-            renderHistory(data);
+            blocks.forEach((block) => {
+                const summary = servers.find((item) => Number(item.id) === Number(block.dataset.id));
+                if (!summary) {
+                    showHistoryError(block);
+                    return;
+                }
+                const emptyNode = block.querySelector('.history-empty');
+                if (emptyNode && summary.empty === true) {
+                    emptyNode.textContent = '아직 기록이 없습니다';
+                }
+                renderHistory(block, summary);
+            });
         } catch (e) {
-            if (emptyNode) {
-                emptyNode.textContent = '기록을 불러오지 못했습니다';
-                emptyNode.classList.remove('is-hidden');
-            }
+            blocks.forEach((block) => showHistoryError(block));
         }
     }
 
@@ -770,52 +871,55 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
     setInterval(loadStatus, 30000);
 
     try {
-        document.getElementById('history-cells')?.addEventListener('click', (event) => {
-            const cell = event.target.closest('.history-cell');
-            if (!cell) {
-                return;
-            }
-            const wasOpen = cell.classList.contains('is-open');
-            document.querySelectorAll('.history-cell.is-open').forEach((node) => node.classList.remove('is-open'));
-            if (!wasOpen) {
-                cell.classList.add('is-open');
-                placeHistoryTip(cell);
-            }
-            if (cell.classList.contains('has-incident') && cell.dataset.date) {
-                selectIncidentDate(cell.dataset.date);
-            }
-        });
-        document.getElementById('history-cells')?.addEventListener('keydown', (event) => {
-            const cell = event.target.closest('.history-cell');
-            if (!cell || !cell.classList.contains('has-incident')) {
-                return;
-            }
-            if (event.key === 'Enter' || event.key === ' ') {
+        document.querySelectorAll('.server-block').forEach((block) => {
+            const cells = block.querySelector('.history-cells');
+            cells?.addEventListener('click', (event) => {
+                const cell = event.target.closest('.history-cell');
+                if (!cell || !block.contains(cell)) {
+                    return;
+                }
+                const wasOpen = cell.classList.contains('is-open');
+                block.querySelectorAll('.history-cell.is-open').forEach((node) => node.classList.remove('is-open'));
+                if (!wasOpen) {
+                    cell.classList.add('is-open');
+                    placeHistoryTip(cell);
+                }
+                if (cell.classList.contains('has-incident') && cell.dataset.date) {
+                    selectIncidentDate(block, cell.dataset.date);
+                }
+            });
+            cells?.addEventListener('keydown', (event) => {
+                const cell = event.target.closest('.history-cell');
+                if (!cell || !block.contains(cell) || !cell.classList.contains('has-incident')) {
+                    return;
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectIncidentDate(block, cell.dataset.date);
+                    return;
+                }
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+                    return;
+                }
+                const incidentList = incidentCells(block);
+                const index = incidentList.indexOf(cell);
+                if (index < 0) {
+                    return;
+                }
+                const next = incidentList[index + (event.key === 'ArrowRight' ? 1 : -1)];
+                if (!next) {
+                    return;
+                }
                 event.preventDefault();
-                selectIncidentDate(cell.dataset.date);
-                return;
-            }
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
-                return;
-            }
-            const cells = incidentCells();
-            const index = cells.indexOf(cell);
-            if (index < 0) {
-                return;
-            }
-            const next = cells[index + (event.key === 'ArrowRight' ? 1 : -1)];
-            if (!next) {
-                return;
-            }
-            event.preventDefault();
-            selectIncidentDate(next.dataset.date);
-            next.focus();
-        });
-        document.getElementById('history-cells')?.addEventListener('mouseover', (event) => {
-            const cell = event.target.closest('.history-cell');
-            if (cell) {
-                placeHistoryTip(cell);
-            }
+                selectIncidentDate(block, next.dataset.date);
+                next.focus();
+            });
+            cells?.addEventListener('mouseover', (event) => {
+                const cell = event.target.closest('.history-cell');
+                if (cell && block.contains(cell)) {
+                    placeHistoryTip(cell);
+                }
+            });
         });
         loadHistory();
         setInterval(loadHistory, 300000);

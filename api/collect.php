@@ -7,41 +7,7 @@ require_once dirname(__DIR__) . '/lib/config.php';
 require_once dirname(__DIR__) . '/lib/history_rules.php';
 require_once dirname(__DIR__) . '/lib/store.php';
 require_once dirname(__DIR__) . '/lib/probe.php';
-
-function collect_header_value(string $name): string
-{
-    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
-    if (isset($_SERVER[$serverKey]) && is_string($_SERVER[$serverKey]) && $_SERVER[$serverKey] !== '') {
-        return $_SERVER[$serverKey];
-    }
-    $redirectKey = 'REDIRECT_' . $serverKey;
-    if (isset($_SERVER[$redirectKey]) && is_string($_SERVER[$redirectKey]) && $_SERVER[$redirectKey] !== '') {
-        return $_SERVER[$redirectKey];
-    }
-    if (function_exists('getallheaders')) {
-        foreach (getallheaders() as $headerName => $value) {
-            if (strcasecmp((string) $headerName, $name) === 0 && is_string($value) && $value !== '') {
-                return $value;
-            }
-        }
-    }
-    return '';
-}
-
-function collect_presented_token(): string
-{
-    $authorization = collect_header_value('Authorization');
-    if (preg_match('/^Bearer\s+(\S+)\s*$/i', $authorization, $matches) === 1) {
-        return $matches[1];
-    }
-
-    $query = $_GET['token'] ?? '';
-    if (is_string($query) && $query !== '') {
-        return $query;
-    }
-
-    return '';
-}
+require_once dirname(__DIR__) . '/lib/collect.php';
 
 function collect_deny(): void
 {
@@ -106,75 +72,100 @@ if ($config === false) {
 }
 
 $expected = $config['collect_token'] ?? '';
-if (!is_string($expected) || $expected === '' || $presented === '' || !hash_equals($expected, $presented)) {
-    collect_deny();
+if (!is_string($expected)) {
+    $expected = '';
 }
 
 $body = null;
 $failure = null;
 $locked = false;
 $responded = false;
-try {
-    $pdo = checks_pdo($config);
-    checks_ensure_schema($pdo);
-    if (!checks_collect_lock($pdo)) {
-        $failure = 'collect busy';
-    } else {
+$pdo = null;
+$performed = collect_perform($presented, $expected, static function () use (
+    $config,
+    &$body,
+    &$failure,
+    &$locked,
+    &$responded,
+    &$pdo
+): void {
+    try {
+        $pdo = checks_pdo($config);
+        checks_ensure_schema($pdo);
+        if (!checks_collect_lock($pdo)) {
+            $failure = 'collect busy';
+            return;
+        }
         $locked = true;
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         checks_prune($pdo, $now);
-        $latest = checks_latest_at($pdo);
-        if ($latest !== null && ($now->getTimestamp() - $latest->getTimestamp()) < 4 * 60) {
-            $body = ['skipped' => true];
-        } else {
-            $host = trim((string) ($config['server_host'] ?? ''));
-            if ($host === '') {
-                $failure = 'server_host is empty';
-            } else {
-                $port = (int) ($config['server_port'] ?? 25565);
-                $timeout = (float) ($config['timeout'] ?? 3);
-                $probe = probe_confirm_deferred(
-                    static function () use ($host, $port, $timeout): array {
-                        return probe_server($host, $port, $timeout);
-                    },
-                    PROBE_CONFIRM_ATTEMPTS,
-                    static function () use (&$responded): void {
-                        $responded = true;
-                        collect_finish_request(['confirming' => true]);
+        $servers = checks_servers($pdo);
+        $timeout = (float) ($config['timeout'] ?? 3);
+        $failure = collect_servers(
+            $servers,
+            $now,
+            static function (string $host, int $port) use ($pdo, $servers): ?DateTimeImmutable {
+                foreach ($servers as $server) {
+                    if ((string) $server['host'] === $host && (int) $server['port'] === $port) {
+                        return checks_latest_at($pdo, (int) $server['id']);
                     }
-                );
-                $data = is_array($probe['data']) ? $probe['data'] : [];
-                $ping = $probe['ping'];
+                }
+                return null;
+            },
+            static function (string $host, int $port) use ($timeout): array {
+                return probe_server($host, $port, $timeout);
+            },
+            static function (array $payload) use (&$responded, &$body): void {
+                if (($payload['confirming'] ?? false) === true) {
+                    $responded = true;
+                    collect_finish_request($payload);
+                    return;
+                }
+                $body = $payload;
+            },
+            static function (string $host, int $port, array $probe) use ($pdo, $now, $servers): void {
+                $serverId = 0;
+                foreach ($servers as $server) {
+                    if ((string) $server['host'] === $host && (int) $server['port'] === $port) {
+                        $serverId = (int) $server['id'];
+                        break;
+                    }
+                }
+                $data = is_array($probe['data'] ?? null) ? $probe['data'] : [];
+                $ping = $probe['ping'] ?? null;
                 checks_insert(
                     $pdo,
+                    $serverId,
                     $now,
-                    (bool) $probe['online'],
+                    (bool) ($probe['online'] ?? false),
                     is_int($ping) ? $ping : null,
                     collect_player_count($data, 'online'),
                     collect_player_count($data, 'max')
                 );
-                if (!$responded) {
-                    $body = [
-                        'skipped' => false,
-                        'online' => (bool) $probe['online'],
-                    ];
+                $favicon = servers_favicon_value($data['favicon'] ?? null);
+                if ($favicon !== null && $serverId > 0) {
+                    checks_save_favicon($pdo, $serverId, $favicon);
                 }
+            }
+        );
+    } catch (Throwable $e) {
+        error_log($e->getMessage());
+        if (!$responded) {
+            $failure = 'database unavailable';
+        }
+    } finally {
+        if ($locked && $pdo instanceof PDO) {
+            try {
+                checks_collect_unlock($pdo);
+            } catch (Throwable $e) {
+                error_log($e->getMessage());
             }
         }
     }
-} catch (Throwable $e) {
-    error_log($e->getMessage());
-    if (!$responded) {
-        $failure = 'database unavailable';
-    }
-} finally {
-    if ($locked) {
-        try {
-            checks_collect_unlock($pdo);
-        } catch (Throwable $e) {
-            error_log($e->getMessage());
-        }
-    }
+});
+
+if (!$performed) {
+    collect_deny();
 }
 
 if ($responded) {
