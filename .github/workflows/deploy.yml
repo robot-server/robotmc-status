@@ -5,10 +5,9 @@
 # 대기 중인 배포는 나중에 도착한 작업이 취소하지 못한다.
 # 업로드 직전에 이 실행의 브랜치 HEAD와 SHA를 비교하고, 다르면 업로드하지 않는다.
 # SFTP_HOST_KEY는 Secret이다. known_hosts에 넣을 공개키이며 "ssh-ed25519 AAAA..." 형식이다. 호스트 이름은 빼 둔다.
-# config.ini는 배포 때 만든다.
+# config.ini는 배포 때 만든다. 마인크래프트 서버 주소는 넣지 않는다.
 # .htaccess는 config.ini의 HTTP 접근을 막는다. 배포에 포함한다.
-# SERVER_HOST는 Secret이다. SERVER_PORT, SERVER_NAME, SERVER_TIMEOUT은 Variable이다.
-# 없으면 포트 25565, 이름 "마인크래프트 서버", 타임아웃 3.
+# SERVER_TIMEOUT은 Variable이다. 없으면 3.
 # DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, COLLECT_TOKEN은 Secret이다. 비어 있으면 이 단계가 실패한다.
 # DB_PORT는 Variable이다. 없으면 3306.
 
@@ -71,9 +70,6 @@ jobs:
 
       - name: Write config.ini
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_PORT: ${{ vars.SERVER_PORT }}
-          SERVER_NAME: ${{ vars.SERVER_NAME }}
           SERVER_TIMEOUT: ${{ vars.SERVER_TIMEOUT }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_PORT: ${{ vars.DB_PORT }}
@@ -84,75 +80,25 @@ jobs:
         run: |
           php <<'PHP'
           <?php
-          $host = getenv('SERVER_HOST');
-          $port = getenv('SERVER_PORT');
-          $name = getenv('SERVER_NAME');
-          $timeout = getenv('SERVER_TIMEOUT');
-          $host = ($host === false || $host === '') ? '' : $host;
-          $port = ($port === false || $port === '') ? '25565' : $port;
-          $name = ($name === false || $name === '') ? '마인크래프트 서버' : $name;
-          $timeout = ($timeout === false || $timeout === '') ? '3' : $timeout;
-
-          if ($host === '') {
-              fwrite(STDERR, "SERVER_HOST secret is empty\n");
-              exit(1);
-          }
-          if (!preg_match('/^\d+$/', $port) || (int) $port < 1 || (int) $port > 65535) {
-              fwrite(STDERR, "SERVER_PORT must be an integer from 1 to 65535\n");
-              exit(1);
-          }
-          if (!preg_match('/^\d+(\.\d+)?$/', $timeout) || (float) $timeout <= 0) {
-              fwrite(STDERR, "SERVER_TIMEOUT must be a positive number\n");
-              exit(1);
-          }
-          $blank = static function (string|false $value): string {
-              return $value === false ? '' : $value;
-          };
-          $dbHost = $blank(getenv('DB_HOST'));
-          $dbPort = $blank(getenv('DB_PORT'));
-          $dbName = $blank(getenv('DB_NAME'));
-          $dbUser = $blank(getenv('DB_USER'));
-          $dbPassword = $blank(getenv('DB_PASSWORD'));
-          $collectToken = $blank(getenv('COLLECT_TOKEN'));
-          if ($dbPort === '') {
-              $dbPort = '3306';
-          }
-          foreach ([
-              'DB_HOST' => $dbHost,
-              'DB_NAME' => $dbName,
-              'DB_USER' => $dbUser,
-              'DB_PASSWORD' => $dbPassword,
-              'COLLECT_TOKEN' => $collectToken,
-          ] as $key => $value) {
-              if ($value === '') {
-                  fwrite(STDERR, $key . " secret is empty\n");
-                  exit(1);
-              }
-          }
-          if (!preg_match('/^\d+$/', $dbPort) || (int) $dbPort < 1 || (int) $dbPort > 65535) {
-              fwrite(STDERR, "DB_PORT must be an integer from 1 to 65535\n");
-              exit(1);
-          }
-          if (preg_match("/[\r\n]/", $host . $name . $dbHost . $dbName . $dbUser . $dbPassword . $collectToken) === 1) {
-              fwrite(STDERR, "config values must be single line\n");
-              exit(1);
-          }
-
           require 'lib/config.php';
-          $quote = static function (string $value): string {
-              return config_quote($value);
+          $blank = static function ($value): string {
+              return is_string($value) ? $value : '';
           };
-          $ini = "server_host = {$quote($host)}\n"
-              . "server_port = {$port}\n"
-              . "server_name = {$quote($name)}\n"
-              . "timeout = {$timeout}\n"
-              . "db_host = {$quote($dbHost)}\n"
-              . "db_port = {$dbPort}\n"
-              . "db_name = {$quote($dbName)}\n"
-              . "db_user = {$quote($dbUser)}\n"
-              . "db_password = {$quote($dbPassword)}\n"
-              . "collect_token = {$quote($collectToken)}\n";
-          if (file_put_contents('config.ini', $ini) === false) {
+          $env = [
+              'SERVER_TIMEOUT' => $blank(getenv('SERVER_TIMEOUT')),
+              'DB_HOST' => $blank(getenv('DB_HOST')),
+              'DB_PORT' => $blank(getenv('DB_PORT')),
+              'DB_NAME' => $blank(getenv('DB_NAME')),
+              'DB_USER' => $blank(getenv('DB_USER')),
+              'DB_PASSWORD' => $blank(getenv('DB_PASSWORD')),
+              'COLLECT_TOKEN' => $blank(getenv('COLLECT_TOKEN')),
+          ];
+          $result = config_deploy_ini($env);
+          if (($result['ok'] ?? false) !== true) {
+              fwrite(STDERR, (string) ($result['error'] ?? 'failed to write config.ini') . "\n");
+              exit(1);
+          }
+          if (file_put_contents('config.ini', $result['ini']) === false) {
               fwrite(STDERR, "failed to write config.ini\n");
               exit(1);
           }

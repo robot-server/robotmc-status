@@ -1,6 +1,6 @@
-server_host = your.server.ip
-server_port = 25565
-server_name = 마인크래프트 서버
+; 마인크래프트 서버 주소는 여기 두지 않는다.
+; robotmc_server 에 직접 넣는다. enabled = 0 이면 화면과 수집에서 빠지고 기록은 남는다.
+; favicon 은 수집이 온라인 조회에서 받은 아이콘을 넣어 둔다. 없으면 비어 있다.
 timeout = 3
 db_host = 127.0.0.1
 db_port = 3306

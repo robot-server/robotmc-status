@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/servers.php';
+
 /**
  * 수집 행을 한국 시간 90일 막대와 장애 구간으로 집계한다.
  * 데이터베이스와 소켓을 열지 않는다.
@@ -241,4 +243,63 @@ function history_summarize(array $checks, DateTimeImmutable $now): array
         'incidents' => history_incidents($inWindow),
         'empty' => $samples === 0,
     ];
+}
+
+/**
+ * 서버 id별로 기존 집계를 한 번씩 호출한다.
+ *
+ * @param list<array<string, mixed>> $checks
+ * @param list<array{host: string, port: int, name?: string}> $servers
+ * @return list<array{
+ *   id: int,
+ *   host: string,
+ *   port: int,
+ *   name: string,
+ *   days: list<array{date: string, samples: int, online: int, uptime: ?float, avg_ping: ?float, color: string}>,
+ *   uptime: ?float,
+ *   last_checked_at: ?string,
+ *   incidents: list<array{start: string, end: string, duration_seconds: int}>,
+ *   empty: bool
+ * }>
+ */
+function history_summarize_servers(array $checks, array $servers, DateTimeImmutable $now): array
+{
+    $groups = [];
+    foreach ($servers as $index => $server) {
+        $groups[$index] = [];
+    }
+
+    foreach ($checks as $check) {
+        $serverId = null;
+        if (array_key_exists('server_id', $check) && $check['server_id'] !== null && $check['server_id'] !== '') {
+            $serverId = (int) $check['server_id'];
+        }
+        $resolved = servers_resolve_id($serverId, $servers);
+        if ($resolved === null) {
+            continue;
+        }
+        foreach ($servers as $index => $server) {
+            if (isset($server['id']) && (int) $server['id'] === $resolved) {
+                $groups[$index][] = $check;
+                break;
+            }
+        }
+    }
+
+    $summaries = [];
+    foreach ($servers as $index => $server) {
+        $summary = history_summarize($groups[$index], $now);
+        $summaries[] = [
+            'id' => isset($server['id']) ? (int) $server['id'] : 0,
+            'host' => (string) $server['host'],
+            'port' => (int) $server['port'],
+            'name' => (string) ($server['name'] ?? ''),
+            'days' => $summary['days'],
+            'uptime' => $summary['uptime'],
+            'last_checked_at' => $summary['last_checked_at'],
+            'incidents' => $summary['incidents'],
+            'empty' => $summary['empty'],
+        ];
+    }
+    return $summaries;
 }

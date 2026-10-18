@@ -19,9 +19,12 @@ if ($config === false) {
 try {
     $pdo = checks_pdo($config);
     checks_ensure_schema($pdo);
+    $servers = checks_servers($pdo);
     $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
     $rows = checks_since($pdo, history_window_start_utc($now));
-    echo json_encode(history_summarize($rows, $now), JSON_UNESCAPED_UNICODE);
+    echo json_encode([
+        'servers' => history_summarize_servers($rows, $servers, $now),
+    ], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     error_log($e->getMessage());
     http_response_code(500);
