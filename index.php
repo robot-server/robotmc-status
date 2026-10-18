@@ -121,6 +121,14 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         .dark .history-cell.is-selected {
             outline-color: #fafafa;
         }
+        .history-cell:focus-visible {
+            outline: 2px solid #2563eb;
+            outline-offset: 1px;
+            z-index: 2;
+        }
+        .dark .history-cell:focus-visible {
+            outline-color: #93c5fd;
+        }
     </style>
 </head>
 <body class="text-zinc-900 dark:text-white min-h-screen py-12 px-4">
@@ -502,6 +510,16 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         }
     }
 
+    const kstFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23'
+    });
+
     function formatKst(utcSql) {
         if (!utcSql) {
             return '없음';
@@ -510,15 +528,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         if (Number.isNaN(date.getTime())) {
             return String(utcSql);
         }
-        const parts = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'Asia/Seoul',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hourCycle: 'h23'
-        }).formatToParts(date);
+        const parts = kstFormatter.formatToParts(date);
         const part = (type) => parts.find((item) => item.type === type)?.value ?? '';
         return part('year') + '-' + part('month') + '-' + part('day') + ' ' + part('hour') + ':' + part('minute');
     }
@@ -540,28 +550,94 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
 
     let historyView = null;
     let pinnedIncidentDate = null;
+    let incidentsByDate = new Map();
 
     function kstDate(utcSql) {
         return formatKst(utcSql).slice(0, 10);
     }
 
-    function incidentsOnDate(incidents, date) {
+    function nextSeoulDate(isoDate) {
+        const [year, month, day] = isoDate.split('-').map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        date.setUTCDate(date.getUTCDate() + 1);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function indexIncidentsByDate(incidents) {
+        const byDate = new Map();
+        incidents.forEach((incident) => {
+            const start = kstDate(incident.start);
+            const end = kstDate(incident.end);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) {
+                return;
+            }
+            let cursor = start;
+            for (let guard = 0; guard < 120 && cursor <= end; guard++) {
+                const list = byDate.get(cursor);
+                if (list) {
+                    list.push(incident);
+                } else {
+                    byDate.set(cursor, [incident]);
+                }
+                if (cursor === end) {
+                    return;
+                }
+                const next = nextSeoulDate(cursor);
+                if (next <= cursor) {
+                    return;
+                }
+                cursor = next;
+            }
+        });
+        return byDate;
+    }
+
+    function incidentsOnDate(date) {
         if (!date) {
             return [];
         }
-        return incidents.filter((incident) => {
-            const start = kstDate(incident.start);
-            const end = kstDate(incident.end);
-            return start <= date && date <= end;
+        return incidentsByDate.get(date) ?? [];
+    }
+
+    function chosenIncidentDate(days) {
+        if (pinnedIncidentDate) {
+            return incidentsOnDate(pinnedIncidentDate).length > 0 ? pinnedIncidentDate : null;
+        }
+        const today = days.length > 0 ? String(days[days.length - 1].date ?? '') : '';
+        return today && incidentsOnDate(today).length > 0 ? today : null;
+    }
+
+    function incidentCells() {
+        return [...document.querySelectorAll('#history-cells .history-cell.has-incident')];
+    }
+
+    function syncIncidentFocus() {
+        const cells = incidentCells();
+        document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
+            if (!cell.classList.contains('has-incident')) {
+                cell.removeAttribute('tabindex');
+            }
+        });
+        if (cells.length === 0) {
+            return;
+        }
+        const current = cells.find((cell) => cell.classList.contains('is-selected'))
+            || cells.find((cell) => cell.getAttribute('tabindex') === '0')
+            || cells[cells.length - 1];
+        cells.forEach((cell) => {
+            const tabIndex = cell === current ? '0' : '-1';
+            if (cell.getAttribute('tabindex') !== tabIndex) {
+                cell.tabIndex = Number(tabIndex);
+            }
         });
     }
 
-    function chosenIncidentDate(days, incidents) {
-        if (pinnedIncidentDate) {
-            return incidentsOnDate(incidents, pinnedIncidentDate).length > 0 ? pinnedIncidentDate : null;
+    function selectIncidentDate(date) {
+        if (!date || incidentsOnDate(date).length === 0) {
+            return;
         }
-        const today = days.length > 0 ? String(days[days.length - 1].date ?? '') : '';
-        return today && incidentsOnDate(incidents, today).length > 0 ? today : null;
+        pinnedIncidentDate = date;
+        renderIncidentSelection();
     }
 
     function renderIncidentSelection() {
@@ -572,8 +648,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             return;
         }
         const days = Array.isArray(historyView?.days) ? historyView.days : [];
-        const incidents = Array.isArray(historyView?.incidents) ? historyView.incidents : [];
-        const date = chosenIncidentDate(days, incidents);
+        const date = chosenIncidentDate(days);
         document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
             const selected = date !== null && cell.dataset.date === date;
             cell.classList.toggle('is-selected', selected);
@@ -584,7 +659,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             }
         });
         list.replaceChildren();
-        const shown = incidentsOnDate(incidents, date);
+        const shown = incidentsOnDate(date);
         wrap.classList.toggle('is-hidden', shown.length === 0);
         if (label && date) {
             label.textContent = date + ' 끊긴 구간';
@@ -598,6 +673,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 + formatDuration(incident.duration_seconds);
             list.appendChild(item);
         });
+        syncIncidentFocus();
     }
 
     function renderHistory(data) {
@@ -605,6 +681,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         const cells = document.querySelectorAll('#history-cells .history-cell');
         const days = Array.isArray(data?.days) ? data.days : [];
         const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
+        incidentsByDate = indexIncidentsByDate(incidents);
         const allowed = { gray: true, green: true, yellow: true, red: true };
         days.forEach((day, index) => {
             const cell = cells[index];
@@ -614,7 +691,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             const color = allowed[day.color] ? day.color : 'gray';
             cell.dataset.color = color;
             cell.dataset.date = String(day.date ?? '');
-            cell.classList.toggle('has-incident', incidentsOnDate(incidents, cell.dataset.date).length > 0);
+            cell.classList.toggle('has-incident', incidentsOnDate(cell.dataset.date).length > 0);
             const uptime = formatUptime(day.uptime);
             const ping = day.avg_ping === null || day.avg_ping === undefined
                 ? '평균 핑 없음'
@@ -705,9 +782,34 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 placeHistoryTip(cell);
             }
             if (cell.classList.contains('has-incident') && cell.dataset.date) {
-                pinnedIncidentDate = cell.dataset.date;
-                renderIncidentSelection();
+                selectIncidentDate(cell.dataset.date);
             }
+        });
+        document.getElementById('history-cells')?.addEventListener('keydown', (event) => {
+            const cell = event.target.closest('.history-cell');
+            if (!cell || !cell.classList.contains('has-incident')) {
+                return;
+            }
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectIncidentDate(cell.dataset.date);
+                return;
+            }
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+                return;
+            }
+            const cells = incidentCells();
+            const index = cells.indexOf(cell);
+            if (index < 0) {
+                return;
+            }
+            const next = cells[index + (event.key === 'ArrowRight' ? 1 : -1)];
+            if (!next) {
+                return;
+            }
+            event.preventDefault();
+            selectIncidentDate(next.dataset.date);
+            next.focus();
         });
         document.getElementById('history-cells')?.addEventListener('mouseover', (event) => {
             const cell = event.target.closest('.history-cell');
