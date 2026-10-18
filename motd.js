@@ -132,8 +132,12 @@
         var style = copyStyle(parent);
         if (!node || typeof node !== 'object') return style;
         if (typeof node.color === 'string') {
-            var named = NAMED_COLORS[node.color.toLowerCase()];
-            if (named) style.color = named;
+            if (/^#[0-9a-f]{6}$/i.test(node.color)) {
+                style.color = node.color.toUpperCase();
+            } else {
+                var named = NAMED_COLORS[node.color.toLowerCase()];
+                if (named) style.color = named;
+            }
         }
         if (typeof node.bold === 'boolean') style.bold = node.bold;
         if (typeof node.italic === 'boolean') style.italic = node.italic;
@@ -239,8 +243,6 @@
         if (lines.length > 0) span.style.textDecorationLine = lines.join(' ');
         if (run.obfuscated) {
             span.classList.add('motd-obfuscated');
-            span.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-            span.style.filter = 'blur(1.5px)';
         }
     }
 

@@ -404,6 +404,21 @@ function runUnit(page) {
     assertStyle(inherited[3], { text: 'D', color: '#55FF55', bold: true, italic: true });
     assertStyle(inherited[4], { text: 'E', color: '#FFFFFF', bold: false, italic: true });
 
+    const hex = motdRuns({ text: 'Hi', color: '#FF8800' });
+    assert.equal(hex.length, 1);
+    assertStyle(hex[0], { text: 'Hi', color: '#FF8800', bold: false });
+    assert.equal(motdRuns({ text: 'Hi', color: '#ff8800' })[0].color, '#FF8800');
+    const gradient = motdRuns({
+        text: '',
+        extra: [
+            { text: 'A', color: '#FF0000' },
+            { text: 'B', color: '#00FF00' },
+        ],
+    });
+    assertStyle(gradient[0], { text: 'A', color: '#FF0000', bold: false });
+    assertStyle(gradient[1], { text: 'B', color: '#00FF00', bold: false });
+    assert.equal(motdRuns({ text: 'Z', color: '#FFF' })[0].color, null);
+
     const isolated = motdRuns({
         color: 'green',
         bold: true,
@@ -446,8 +461,11 @@ function runUnit(page) {
     const secret = dirty.querySelector('span');
     assert.equal(secret.textContent, 'Abc');
     assert.equal(secret.classList.contains('motd-obfuscated'), true);
-    assert.equal(secret.style.filter, 'blur(1.5px)');
-    assert.notEqual(secret.style.fontFamily, undefined);
+    assert.equal(secret.style.filter, undefined);
+    assert.equal(secret.style.fontFamily, undefined);
+    assert.match(indexSource, /\.motd-obfuscated\s*\{[^}]*font-family:[^}]*filter:\s*blur\(1\.5px\)/s);
+    assert.match(indexSource, /\.online-motd\s*\{[^}]*background:\s*#1e1e1e;[^}]*color:\s*#aaaaaa;/s);
+    assert.doesNotMatch(indexSource, /class="online-motd[^"]*bg-zinc-100/);
 
     fillOnlineMotd(dirty, '§n§mLine');
     const line = dirty.querySelector('span');
@@ -606,7 +624,7 @@ function assertChromeResult(parsed) {
     assert.equal(parsed.obfuscated.runs.length, 1);
     assert.equal(parsed.obfuscated.runs[0].text, 'Abc');
     assert.match(parsed.obfuscated.runs[0].className, /motd-obfuscated/);
-    assert.match(parsed.obfuscated.runs[0].filter, /blur/);
+    assert.equal(parsed.obfuscated.runs[0].filter, '');
 }
 
 function runDom() {

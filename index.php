@@ -94,6 +94,12 @@ function index_refresh_bar(string $marginClass): void
             opacity: 0;
         }
 
+        .online-motd {
+            background: #1e1e1e;
+            color: #aaaaaa;
+            border-color: #3f3f46;
+        }
+
         .motd-obfuscated {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             filter: blur(1.5px);
@@ -286,7 +292,7 @@ function index_refresh_bar(string $marginClass): void
                     </div>
                 </div>
 
-                <div class="online-motd bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border border-zinc-200 dark:border-zinc-700"></div>
+                <div class="online-motd rounded-2xl p-6 mb-7 text-lg leading-relaxed whitespace-pre-wrap text-center border"></div>
 
                 <div class="grid grid-cols-2 gap-6 mb-8">
                     <div>
