@@ -110,6 +110,17 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         .history-cell.is-open .history-tip {
             display: block;
         }
+        .history-cell.has-incident {
+            cursor: pointer;
+        }
+        .history-cell.is-selected {
+            outline: 2px solid #18181b;
+            outline-offset: 1px;
+            z-index: 1;
+        }
+        .dark .history-cell.is-selected {
+            outline-color: #fafafa;
+        }
     </style>
 </head>
 <body class="text-zinc-900 dark:text-white min-h-screen py-12 px-4">
@@ -208,7 +219,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         <p id="history-empty" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">아직 기록이 없습니다</p>
         <p id="history-last" class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">마지막 수집 없음</p>
         <div id="history-incidents-wrap" class="mt-4 is-hidden">
-            <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
+            <p id="history-incidents-label" class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">끊긴 구간</p>
             <ul id="history-incidents" class="text-sm text-zinc-700 dark:text-zinc-300 space-y-1"></ul>
         </div>
     </section>
@@ -527,9 +538,73 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
         return remainMinutes === 0 ? hours + '시간' : hours + '시간 ' + remainMinutes + '분';
     }
 
+    let historyView = null;
+    let pinnedIncidentDate = null;
+
+    function kstDate(utcSql) {
+        return formatKst(utcSql).slice(0, 10);
+    }
+
+    function incidentsOnDate(incidents, date) {
+        if (!date) {
+            return [];
+        }
+        return incidents.filter((incident) => {
+            const start = kstDate(incident.start);
+            const end = kstDate(incident.end);
+            return start <= date && date <= end;
+        });
+    }
+
+    function chosenIncidentDate(days, incidents) {
+        if (pinnedIncidentDate) {
+            return incidentsOnDate(incidents, pinnedIncidentDate).length > 0 ? pinnedIncidentDate : null;
+        }
+        const today = days.length > 0 ? String(days[days.length - 1].date ?? '') : '';
+        return today && incidentsOnDate(incidents, today).length > 0 ? today : null;
+    }
+
+    function renderIncidentSelection() {
+        const wrap = document.getElementById('history-incidents-wrap');
+        const list = document.getElementById('history-incidents');
+        const label = document.getElementById('history-incidents-label');
+        if (!wrap || !list) {
+            return;
+        }
+        const days = Array.isArray(historyView?.days) ? historyView.days : [];
+        const incidents = Array.isArray(historyView?.incidents) ? historyView.incidents : [];
+        const date = chosenIncidentDate(days, incidents);
+        document.querySelectorAll('#history-cells .history-cell').forEach((cell) => {
+            const selected = date !== null && cell.dataset.date === date;
+            cell.classList.toggle('is-selected', selected);
+            if (selected) {
+                cell.setAttribute('aria-current', 'date');
+            } else {
+                cell.removeAttribute('aria-current');
+            }
+        });
+        list.replaceChildren();
+        const shown = incidentsOnDate(incidents, date);
+        wrap.classList.toggle('is-hidden', shown.length === 0);
+        if (label && date) {
+            label.textContent = date + ' 끊긴 구간';
+        }
+        shown.forEach((incident) => {
+            const item = document.createElement('li');
+            item.textContent = formatKst(incident.start)
+                + ' – '
+                + formatKst(incident.end)
+                + ' · '
+                + formatDuration(incident.duration_seconds);
+            list.appendChild(item);
+        });
+    }
+
     function renderHistory(data) {
+        historyView = data;
         const cells = document.querySelectorAll('#history-cells .history-cell');
         const days = Array.isArray(data?.days) ? data.days : [];
+        const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
         const allowed = { gray: true, green: true, yellow: true, red: true };
         days.forEach((day, index) => {
             const cell = cells[index];
@@ -538,6 +613,8 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             }
             const color = allowed[day.color] ? day.color : 'gray';
             cell.dataset.color = color;
+            cell.dataset.date = String(day.date ?? '');
+            cell.classList.toggle('has-incident', incidentsOnDate(incidents, cell.dataset.date).length > 0);
             const uptime = formatUptime(day.uptime);
             const ping = day.avg_ping === null || day.avg_ping === undefined
                 ? '평균 핑 없음'
@@ -558,6 +635,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             }
             tip.textContent = detail;
         });
+        for (let index = days.length; index < cells.length; index++) {
+            cells[index].dataset.date = '';
+            cells[index].classList.remove('has-incident');
+        }
 
         const uptimeNode = document.getElementById('history-uptime');
         if (uptimeNode) {
@@ -578,22 +659,7 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
                 : '마지막 수집 없음';
         }
 
-        const wrap = document.getElementById('history-incidents-wrap');
-        const list = document.getElementById('history-incidents');
-        if (wrap && list) {
-            list.replaceChildren();
-            const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
-            wrap.classList.toggle('is-hidden', incidents.length === 0);
-            incidents.forEach((incident) => {
-                const item = document.createElement('li');
-                item.textContent = formatKst(incident.start)
-                    + ' – '
-                    + formatKst(incident.end)
-                    + ' · '
-                    + formatDuration(incident.duration_seconds);
-                list.appendChild(item);
-            });
-        }
+        renderIncidentSelection();
     }
 
     async function loadHistory() {
@@ -637,6 +703,10 @@ $SERVER_NAME = $config['server_name'] ?? '마인크래프트 서버';
             if (!wasOpen) {
                 cell.classList.add('is-open');
                 placeHistoryTip(cell);
+            }
+            if (cell.classList.contains('has-incident') && cell.dataset.date) {
+                pinnedIncidentDate = cell.dataset.date;
+                renderIncidentSelection();
             }
         });
         document.getElementById('history-cells')?.addEventListener('mouseover', (event) => {
