@@ -169,32 +169,45 @@ function index_refresh_bar(string $marginClass): void
         .dark .history-cell:focus-visible {
             outline-color: #93c5fd;
         }
-        .server-drawer[hidden] {
-            display: none;
-        }
-        .server-drawer {
+        .server-popover {
             position: fixed;
-            inset: 0;
-            z-index: 60;
-        }
-        .server-drawer-backdrop {
-            position: absolute;
-            inset: 0;
-            background: rgb(0 0 0 / 0.45);
-        }
-        .server-drawer-panel {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            max-height: 70vh;
+            inset: unset;
+            width: max-content;
+            min-width: 14rem;
+            max-width: min(24rem, calc(100vw - 1.5rem));
+            height: auto;
+            max-height: min(24rem, calc(100dvh - 5rem));
+            margin: 0;
             overflow: auto;
-            padding: 0.75rem 1rem calc(1.25rem + env(safe-area-inset-bottom));
-            border-radius: 1.5rem 1.5rem 0 0;
+            padding: 0.375rem;
+            border: 1px solid #e4e4e7;
+            border-radius: 1.25rem;
             background: #fff;
+            color: #18181b;
+            box-shadow: 0 18px 40px -16px rgb(0 0 0 / 0.35);
         }
-        .dark .server-drawer-panel {
+        .dark .server-popover {
+            border-color: #27272a;
             background: #18181b;
+            color: #fafafa;
+        }
+        #server-picker .picker-chevron {
+            transition: transform 0.15s ease;
+        }
+        #server-picker[aria-expanded="true"] .picker-chevron {
+            transform: rotate(180deg);
+        }
+        @supports (anchor-name: --server-picker) {
+            #server-picker {
+                anchor-name: --server-picker;
+            }
+            .server-popover {
+                position-anchor: --server-picker;
+                top: calc(anchor(bottom) + 0.5rem);
+                left: anchor(center);
+                translate: -50% 0;
+                position-try-fallbacks: flip-block;
+            }
         }
     </style>
 </head>
@@ -202,9 +215,9 @@ function index_refresh_bar(string $marginClass): void
 <div class="max-w-3xl mx-auto">
     <div class="text-center mb-10">
         <?php if ($multiple && $selected !== null): ?>
-        <button type="button" id="server-drawer-open" class="inline-flex items-center justify-center gap-2" aria-expanded="false" aria-controls="server-drawer">
+        <button type="button" id="server-picker" class="inline-flex items-center justify-center gap-2" popovertarget="server-popover" aria-expanded="false" aria-controls="server-popover">
             <h1 class="text-4xl font-bold tracking-tight"><?= index_h($heading) ?></h1>
-            <i class="fa-solid fa-chevron-down text-xl text-zinc-400" aria-hidden="true"></i>
+            <i class="picker-chevron fa-solid fa-chevron-down text-xl text-zinc-400" aria-hidden="true"></i>
         </button>
         <?php else: ?>
         <h1 class="text-4xl font-bold tracking-tight"><?= index_h($heading) ?></h1>
@@ -213,54 +226,63 @@ function index_refresh_bar(string $marginClass): void
     </div>
 
     <?php if ($multiple && $selected !== null): ?>
-    <div id="server-drawer" class="server-drawer" hidden>
-        <button type="button" class="server-drawer-backdrop" aria-label="닫기"></button>
-        <div class="server-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="server-drawer-title">
-            <h2 id="server-drawer-title" class="sr-only">서버 선택</h2>
-            <ul class="max-w-3xl mx-auto">
-                <?php foreach ($servers as $server): ?>
-                <?php $serverFavicon = $server['favicon'] ?? null; ?>
-                <li>
-                    <a class="flex items-center gap-3 rounded-2xl px-3 py-3 hover:bg-zinc-100 dark:hover:bg-zinc-800" href="?id=<?= (int) $server['id'] ?>">
-                        <?php if (is_string($serverFavicon) && $serverFavicon !== ''): ?>
-                        <img class="h-12 w-12 rounded-xl border border-zinc-200 dark:border-zinc-700" src="<?= index_h($serverFavicon) ?>" alt="">
-                        <?php else: ?>
-                        <span class="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-zinc-400 dark:bg-zinc-800" aria-hidden="true">
-                            <i class="fa-solid fa-server"></i>
-                        </span>
-                        <?php endif; ?>
-                        <span class="text-lg font-medium"><?= index_h($server['name']) ?></span>
-                        <?php if ((int) $server['id'] === (int) $selected['id']): ?>
-                        <i class="fa-solid fa-check ml-auto text-zinc-500" aria-label="선택됨"></i>
-                        <?php endif; ?>
-                    </a>
-                </li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
+    <div id="server-popover" class="server-popover" popover aria-label="서버 선택">
+        <ul>
+            <?php foreach ($servers as $server): ?>
+            <?php $serverFavicon = $server['favicon'] ?? null; ?>
+            <li>
+                <a class="flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:hover:bg-zinc-800 dark:focus-visible:outline-blue-300" href="?id=<?= (int) $server['id'] ?>">
+                    <?php if (is_string($serverFavicon) && $serverFavicon !== ''): ?>
+                    <img class="h-10 w-10 shrink-0 rounded-lg border border-zinc-200 dark:border-zinc-700" src="<?= index_h($serverFavicon) ?>" alt="">
+                    <?php else: ?>
+                    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-400 dark:bg-zinc-800" aria-hidden="true">
+                        <i class="fa-solid fa-server"></i>
+                    </span>
+                    <?php endif; ?>
+                    <span class="text-left text-base font-medium leading-snug"><?= index_h($server['name']) ?></span>
+                    <?php if ((int) $server['id'] === (int) $selected['id']): ?>
+                    <i class="fa-solid fa-check ml-auto shrink-0 text-zinc-500" aria-label="선택됨"></i>
+                    <?php endif; ?>
+                </a>
+            </li>
+            <?php endforeach; ?>
+        </ul>
     </div>
     <script>
         (function () {
-            const openButton = document.getElementById('server-drawer-open');
-            const drawer = document.getElementById('server-drawer');
-            if (!openButton || !drawer) {
+            const openButton = document.getElementById('server-picker');
+            const popover = document.getElementById('server-popover');
+            if (!openButton || !popover) {
                 return;
             }
-            const closeDrawer = () => {
-                drawer.hidden = true;
-                openButton.setAttribute('aria-expanded', 'false');
+            const anchored = window.CSS && CSS.supports('anchor-name: --server-picker');
+            const place = () => {
+                const margin = 8;
+                const anchor = openButton.getBoundingClientRect();
+                const rect = popover.getBoundingClientRect();
+                let left = anchor.left + (anchor.width - rect.width) / 2;
+                left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+                let top = anchor.bottom + margin;
+                if (top + rect.height > window.innerHeight - margin && anchor.top - margin - rect.height >= margin) {
+                    top = anchor.top - margin - rect.height;
+                }
+                popover.style.left = left + 'px';
+                popover.style.top = top + 'px';
             };
-            openButton.addEventListener('click', () => {
-                const willOpen = drawer.hidden;
-                drawer.hidden = !willOpen;
-                openButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-            });
-            drawer.querySelector('.server-drawer-backdrop').addEventListener('click', closeDrawer);
-            document.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') {
-                    closeDrawer();
+            popover.addEventListener('toggle', (event) => {
+                const open = event.newState === 'open';
+                openButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open && !anchored) {
+                    place();
                 }
             });
+            if (!anchored) {
+                window.addEventListener('resize', () => {
+                    if (popover.matches(':popover-open')) {
+                        place();
+                    }
+                });
+            }
         })();
     </script>
     <?php endif; ?>
